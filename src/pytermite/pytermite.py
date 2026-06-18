@@ -35,10 +35,12 @@ from pytermite.connection import (
 )
 from pytermite.utils import load_serial_numbers_from_json
 from pytermite.lineartimecode_two import LTC_Generator
+from pytermite.fetch_data import fetch_recorded
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 GOPROS: dict[str, WiredConnection] = {}
 CONNECTED_GOPROS: set[WiredConnection] = set()
+CONNECTED_SERIALS: dict[str, str] | set[str] | None = None
 KEEP_OPEN = False
 
 
@@ -318,6 +320,7 @@ def connect(
         Path to a JSON file containing serials.
     """
     global GOPROS
+    global CONNECTED_SERIALS
     log = logger.bind(command="connect")
     serial_numbers: dict[str, str] | set[str] | None = None
     if auto:
@@ -353,6 +356,7 @@ def connect(
         log.debug("Serial numbers to connect to: %s", serial_numbers)
     GOPROS = create_wired_gopros(gopro_serials=serial_numbers)
     asyncio.run(_connect_to_gopros())
+    CONNECTED_SERIALS = serial_numbers
     log.info("Connected to all requested GoPro cameras")
     # When running inside the interactive shell the process will stay alive
     # and the user can call `disconnect` from the same shell. If invoked
@@ -380,6 +384,8 @@ def disconnect() -> None:
     log = logger.bind(command="disconnect")
     log.info("Disconnecting from all connected GoPro cameras")
     global CONNECTED_GOPROS
+    global CONNECTED_SERIALS
+    CONNECTED_SERIALS = None
     asyncio.run(close_gopros(gopros=CONNECTED_GOPROS))
     if KEEP_OPEN:
         _run_repl(click.get_current_context())
@@ -396,8 +402,9 @@ ltc_processes = []
 @click.option('--device', default=None, type=int)
 @click.option('--fps', default=50, type=int)
 @click.option('--sample_rate', default=48000, type=int)
+@click.option('--save_path', default=None, type=click.Path())
 @click.argument("action", type=click.Choice(["start", "stop"]))
-def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: int) -> None:  # numpydoc ignore=GL03
+def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: int, save_path: str|None) -> None:  # numpydoc ignore=GL03
     """
     Start or stop recording on all currently connected GoPro cameras.
 
@@ -410,6 +417,7 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
     """
     log = logger.bind(command="record")
     global CONNECTED_GOPROS
+    global CONNECTED_SERIALS
     try:
         if not no_timecode and (device is not None or action == "stop"):
             if action == "start":
@@ -428,6 +436,8 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
                     p[1].set()
         else:
             asyncio.run(camera_shutter(CONNECTED_GOPROS, action))
+        #TODO create test for available usb connections after port reconnect
+        fetch_recorded(CONNECTED_SERIALS, save_path, log)
     except RuntimeError as e:
         log.error(str(e))
     if KEEP_OPEN:
