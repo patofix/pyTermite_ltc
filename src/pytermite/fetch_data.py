@@ -25,7 +25,7 @@ def fetch_recorded( serials: dict[str, str] | set[str] | None = None,
         save_path = Path(save_path)
 
     for serial_nr in serials:
-        save_path = save_path / serial_nr[-4:]
+        save_path_cam = save_path / serial_nr[-4:]
         ip = f"172.2{serial_nr[-3]}.1{serial_nr[-2:]}.51:8080"
 
         url_last = f"http://{ip}/gopro/media/last_captured"
@@ -49,8 +49,9 @@ def fetch_recorded( serials: dict[str, str] | set[str] | None = None,
             url = f"http://{ip}/videos/DCIM/{response_data["folder"]}/{response_data["file"]}"
             response = requests.request("GET", url)
             if response.status_code == 200:
-                os.make_dir(save_path, exists_ok=True)
-                with open(save_path / response_data["file"], "wb") as f:
+                os.makedirs(save_path_cam, exist_ok=True)
+                logger.info(f"Saved to {save_path_cam}")
+                with open(save_path_cam / response_data["file"], "wb") as f:
                     f.write(response.content)
             else:
                 logger.warning(f"Unknown: Data of {serial_nr[-4:]} could not be fetched. Filename: {response_data["file"]}")
