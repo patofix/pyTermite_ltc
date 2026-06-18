@@ -391,6 +391,7 @@ def disconnect() -> None:
         _run_repl(click.get_current_context())
 
 ltc_processes = []
+last_timecode_flag = False
 @cli.command()
 @click.option(
     "--no-timecode",
@@ -416,8 +417,12 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
         Whether to start or stop recording.
     """
     log = logger.bind(command="record")
+    global ltc_processes
+    global last_timecode_flag
     global CONNECTED_GOPROS
     global CONNECTED_SERIALS
+    no_timecode = last_timecode_flag if action == "stop" else no_timecode
+    last_timecode_flag = no_timecode if action == "start" else last_timecode_flag
     try:
         if not no_timecode and (device is not None or action == "stop"):
             if action == "start":
@@ -437,7 +442,9 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
         else:
             asyncio.run(camera_shutter(CONNECTED_GOPROS, action))
         #TODO create test for available usb connections after port reconnect
-        fetch_recorded(CONNECTED_SERIALS, save_path, log)
+        if action == "stop":
+            fetch_process = Process(target=fetch_recorded, args=(CONNECTED_SERIALS, save_path, log), daemon=False)
+            fetch_process.start()
     except RuntimeError as e:
         log.error(str(e))
     if KEEP_OPEN:

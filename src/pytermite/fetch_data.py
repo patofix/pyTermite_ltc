@@ -1,11 +1,16 @@
 import requests
 from pathlib import Path
+import json
+import time
 
 from pytermite.connection import (
     WiredConnection
 )
 
-def fetch_recorded(serials: dict[str, str] | set[str] | None = None, save_path: str|None = None, logger = None):
+def fetch_recorded( serials: dict[str, str] | set[str] | None = None, 
+                    save_path: str|None = None, 
+                    logger = None
+    ):
     logger_available = logger is not None
     if (serials is None or len(serials) < 1):
         if logger_available:
@@ -23,10 +28,22 @@ def fetch_recorded(serials: dict[str, str] | set[str] | None = None, save_path: 
         url_last = f"http://{ip}/gopro/media/last_captured"
         response_last = requests.request("GET", url_last)
 
+        response_data = json.loads(response_last.text)
         if response_last.status_code == 200:
-            url = f"http://{ip}/videos/DCIM/{response_last["folder"]}/{response_last["file"]}"
+            url_info = f"http://{ip}/gopro/media/info"
+            querystring = {"path":f"{response_data["folder"]}/{response_data["file"]}"}
+
+            counter = 0
+            while counter < 10:
+                response = json.loads(requests.request("GET", url, params=querystring).text)
+                if response["tr"] == 1:
+                    break
+                counter += 1
+                time.sleep(1)
+
+            url = f"http://{ip}/videos/DCIM/{response_data["folder"]}/{response_data["file"]}"
             response = requests.request("GET", url)
-            with open(save_path / response_last["file"], "wb") as f:
+            with open(save_path / response_data["file"], "wb") as f:
                 f.write(response.content)
 
         elif logger_available:
