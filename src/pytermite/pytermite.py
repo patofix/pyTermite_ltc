@@ -17,8 +17,13 @@ import atexit
 import enum
 import logging
 import shlex
+import os
+import re
+import sys
+import subprocess
 from pathlib import Path
 from multiprocessing import Process, Event
+from threading import Thread
 
 import click
 import structlog
@@ -426,14 +431,19 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
     try:
         if not no_timecode and (device is not None or action == "stop"):
             if action == "start":
+                target_serial = next(iter(CONNECTED_SERIALS))
+                last_three = target_serial[-3:]
+                gopro_ip = f"172.2{last_three[0]}.1{last_three[1]}{last_three[2]}.51"
+                resolved_usb_port = get_usbport_by_ip(gopro_ip)
                 ltc_config = {
                     "sample_rate": sample_rate,
                     "fps": fps,
-                    "device": device
+                    "device": device,
+                    "usb_port": resolved_usb_port,
                 }
                 stop_event = Event()
                 generator = LTC_Generator(ltc_config, stop_event)
-                ltc_process = Process(target=generator.run)
+                ltc_process = Thread(target=generator.run, daemon=True)
                 ltc_process.start()
                 ltc_processes.append((ltc_process, stop_event))
             elif action == "stop":
@@ -450,6 +460,9 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
     if KEEP_OPEN:
         _run_repl(click.get_current_context())
 
+def run_generator_isolated(generator):
+    sys.stdin = open(os.devnull, 'r')
+    generator.run()
 
 def _exit_handler() -> None:
     """
@@ -460,6 +473,37 @@ def _exit_handler() -> None:
     log.info("Closing all connections")
     global CONNECTED_GOPROS
     asyncio.run(close_gopros(gopros=CONNECTED_GOPROS))
+
+def get_usbport_by_ip(gopro_ip: str) -> str | None:
+    net_dir = "/sys/class/net"
+    if not os.path.exists(net_dir):
+        return None
+
+    for interface in os.listdir(net_dir):
+        device_link = os.path.join(net_dir, interface, "device")
+        if not os.path.islink(device_link):
+            continue
+        
+        real_path = os.path.realpath(device_link)
+        if "usb" not in real_path:
+            continue
+
+        match = re.search(r'/usb\d+/([^/:\s]+)', real_path)
+        if not match:
+            continue
+
+        usb_port = match.group(1)
+
+        try:
+            output = subprocess.check_output(["ip", "route", "show", "dev", interface], text=True)
+
+            subnet_prefix = ".".join(gopro_ip.split(".")[:2])
+            if subnet_prefix in output:
+                return usb_port
+        except subprocess.SubprocessError:
+            continue
+
+    return None
 
 
 atexit.register(_exit_handler)
