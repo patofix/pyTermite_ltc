@@ -13,6 +13,7 @@ import soundfile as sf
 import threading
 import queue
 import subprocess
+import time
 
 position_map = {
     50: {
@@ -148,36 +149,97 @@ class LTC_Generator():
             outdata[:] = 0
             return
 
-    # TODO: remove that
-    def toggle_usb_port(self, port_name: str, state: str):
-        path = f"/sys/bus/usb/devices/{port_name}/power/control"
+    def _is_port_bound(self, port: str) -> bool:
+        """
+        Check if a USB port is currently bound to the usb driver via sysfs.
+        Returns True if bound, False if unbound.
+        """
+        # When bound, a symlink exists at this path
+        bound_path = f"/sys/bus/usb/drivers/usb/{port}"
+        return os.path.exists(bound_path)
+
+
+    def toggle_usb_port(self, port: str, action: str = "disconnect") -> bool:
+        """
+        Bind or unbind a USB port and verify the result.
+
+        Returns
+        -------
+        bool
+            True if the action succeeded and was verified, False otherwise.
+        """
+        sysfs_path = {
+            "disconnect": "/sys/bus/usb/drivers/usb/unbind",
+            "connect":    "/sys/bus/usb/drivers/usb/bind",
+        }.get(action)
+
+        if sysfs_path is None:
+            print(f"Unknown action: {action}")
+            return False
+
+        # Check precondition — warn if already in target state
+        currently_bound = self._is_port_bound(port)
+        if action == "disconnect" and not currently_bound:
+            print(f"Warning: USB port {port} is already unbound.")
+            return True  # already in desired state
+        if action == "connect" and currently_bound:
+            print(f"Warning: USB port {port} is already bound.")
+            return True
+
         try:
-            with open(path, 'w') as f:
-                f.write(state)
+            with open(sysfs_path, "w") as f:
+                f.write(port)
         except PermissionError:
-            print(f"Error: Insufficient privileges to modify USB state at {path}. Run as root.")
-        except FileNotFoundError:
-            print(f"Error: USB port {port_name} not found.")
+            subprocess.run(
+                f"echo '{port}' | sudo tee {sysfs_path}",
+                shell=True, check=True,
+            )
+        except OSError as e:
+            print(f"Failed to {action} USB port {port}: {e}")
+            return False
+
+        # Verify: sysfs changes are fast but not always instant
+        time.sleep(0.2)
+        now_bound = self._is_port_bound(port)
+
+        if action == "disconnect" and not now_bound:
+            print(f"USB port {port} successfully unbound.")
+            return True
+        elif action == "connect" and now_bound:
+            print(f"USB port {port} successfully rebound.")
+            return True
+        else:
+            print(f"ERROR: USB port {port} toggle to '{action}' could not be verified!")
+            return False
 
 
     def run(self):
-
-        # if self.usb_port:
-        #     # disconnect usb devices
-        #     # self.toggle_usb_port(self.usb_port, "auto")
-        #     subprocess.run(f"echo '{self.usb_port}' | sudo tee /sys/bus/usb/drivers/usb/unbind", shell=True)
+        if self.usb_port:
+            print(f"Disconnecting USB port: {self.usb_port}...")
+            if not self.toggle_usb_port(self.usb_port, "disconnect"):
+                print("Aborting: could not confirm USB disconnection.")
+                return
+            time.sleep(4)
 
         t = threading.Thread(target=self.generate_frames, daemon=True)
         t.start()
         self.play_control_sound("start_recording")
-        while not self.stop_event.is_set():
-            with sd.OutputStream(samplerate=self.sample_rate, device=self.device, 
-                        channels=1, dtype='float32',
-                        blocksize=self.samples_per_frame,
-                        callback=self.callback):
-                while not self.stop_event.is_set():
-                    sd.sleep(1000)
+
+        with sd.OutputStream(
+            samplerate=self.sample_rate,
+            device=self.device,
+            channels=1,
+            dtype='float32',
+            blocksize=self.samples_per_frame,
+            callback=self.callback,
+        ):
+            while not self.stop_event.is_set():
+                sd.sleep(1000)
+
         self.play_control_sound("stop_recording")
 
-        # if self.usb_port:
-        #     subprocess.run(f"echo '{self.usb_port}' | sudo tee /sys/bus/usb/drivers/usb/bind", shell=True)
+        sd.sleep(2000)
+
+        if self.usb_port:
+            if not self.toggle_usb_port(self.usb_port, "connect"):
+                print("Warning: USB port may not have been restored — check manually.")
