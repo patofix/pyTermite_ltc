@@ -13,6 +13,7 @@ import soundfile as sf
 import threading
 import queue
 import time
+from pylsl import StreamInfo, StreamOutlet
 
 position_map = {
     50: {
@@ -70,6 +71,9 @@ class LTC_Generator():
         self.samples_per_bit = self.sample_rate / self.fps / 80
         self.total_samples = 0
         self.frame_queue = queue.Queue(maxsize=self.fps)
+        self.info = StreamInfo(name='LtcStream', type='Audio', channel_count=1, 
+                  nominal_srate=self.sample_rate, channel_format='float32', source_id='ltc_audio_stream')
+        self.outlet = StreamOutlet(self.info)
 
     def play_control_sound(self, filename: str, amplification:float=1.0):
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -145,7 +149,8 @@ class LTC_Generator():
             outdata[:, 0] = self.frame_queue.get_nowait()
         except queue.Empty:
             outdata[:] = 0
-            return
+        finally:
+            self.outlet.push_chunk(outdata.copy()) 
 
     def run(self):
         t = threading.Thread(target=self.generate_frames, daemon=True)
