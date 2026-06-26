@@ -39,6 +39,7 @@ def fetch_recorded( serials: dict[str, str] | set[str] | None = None,
             while counter < allowed_retries:
                 response = requests.request("GET", url_info)
                 if response_last.status_code == 200:
+                    time.sleep(1)
                     break
                 counter += 1
                 time.sleep(1)

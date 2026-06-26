@@ -70,7 +70,6 @@ class LTC_Generator():
         self.samples_per_bit = self.sample_rate / self.fps / 80
         self.total_samples = 0
         self.frame_queue = queue.Queue(maxsize=self.fps)
-        self.usb_port = config.get("usb_port")
 
     def play_control_sound(self, filename: str):
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -148,25 +147,7 @@ class LTC_Generator():
             outdata[:] = 0
             return
 
-    # TODO: remove that
-    def toggle_usb_port(self, port_name: str, state: str):
-        path = f"/sys/bus/usb/devices/{port_name}/power/control"
-        try:
-            with open(path, 'w') as f:
-                f.write(state)
-        except PermissionError:
-            print(f"Error: Insufficient privileges to modify USB state at {path}. Run as root.")
-        except FileNotFoundError:
-            print(f"Error: USB port {port_name} not found.")
-
-
     def run(self):
-
-        # if self.usb_port:
-        #     # disconnect usb devices
-        #     # self.toggle_usb_port(self.usb_port, "auto")
-        #     subprocess.run(f"echo '{self.usb_port}' | sudo tee /sys/bus/usb/drivers/usb/unbind", shell=True)
-
         t = threading.Thread(target=self.generate_frames, daemon=True)
         t.start()
         self.play_control_sound("start_recording")
@@ -178,6 +159,3 @@ class LTC_Generator():
                 while not self.stop_event.is_set():
                     sd.sleep(1000)
         self.play_control_sound("stop_recording")
-
-        # if self.usb_port:
-        #     subprocess.run(f"echo '{self.usb_port}' | sudo tee /sys/bus/usb/drivers/usb/bind", shell=True)

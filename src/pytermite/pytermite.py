@@ -41,11 +41,13 @@ from pytermite.connection import (
 from pytermite.utils import load_serial_numbers_from_json
 from pytermite.lineartimecode_two import LTC_Generator
 from pytermite.fetch_data import fetch_recorded
+from pytermite.usb_handling import activate_ports, deactivate_ports, get_usbports
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 GOPROS: dict[str, WiredConnection] = {}
 CONNECTED_GOPROS: set[WiredConnection] = set()
 CONNECTED_SERIALS: dict[str, str] | set[str] | None = None
+CONNECTED_USB_PORTS: set[str] = set()
 KEEP_OPEN = False
 
 
@@ -326,6 +328,7 @@ def connect(
     """
     global GOPROS
     global CONNECTED_SERIALS
+    global CONNECTED_USB_PORTS
     log = logger.bind(command="connect")
     serial_numbers: dict[str, str] | set[str] | None = None
     if auto:
@@ -362,6 +365,8 @@ def connect(
     GOPROS = create_wired_gopros(gopro_serials=serial_numbers)
     asyncio.run(_connect_to_gopros())
     CONNECTED_SERIALS = serial_numbers
+    CONNECTED_USB_PORTS = get_usbports(CONNECTED_SERIALS)
+    log.info(CONNECTED_USB_PORTS)
     log.info("Connected to all requested GoPro cameras")
     # When running inside the interactive shell the process will stay alive
     # and the user can call `disconnect` from the same shell. If invoked
@@ -391,6 +396,7 @@ def disconnect() -> None:
     global CONNECTED_GOPROS
     global CONNECTED_SERIALS
     CONNECTED_SERIALS = None
+    CONNECTED_USB_PORTS = set()
     asyncio.run(close_gopros(gopros=CONNECTED_GOPROS))
     if KEEP_OPEN:
         _run_repl(click.get_current_context())
@@ -426,21 +432,22 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
     global last_timecode_flag
     global CONNECTED_GOPROS
     global CONNECTED_SERIALS
+    global CONNECTED_USB_PORTS
     no_timecode = last_timecode_flag if action == "stop" else no_timecode
-    last_timecode_flag = no_timecode if action == "start" else last_timecode_flag
+    last_timecode_flag = (no_timecode if device is not None else True) if action == "start" else last_timecode_flag
     try:
         if not no_timecode and (device is not None or action == "stop"):
             if action == "start":
-                target_serial = next(iter(CONNECTED_SERIALS))
-                last_three = target_serial[-3:]
-                gopro_ip = f"172.2{last_three[0]}.1{last_three[1]}{last_three[2]}.51"
-                resolved_usb_port = get_usbport_by_ip(gopro_ip)
                 ltc_config = {
                     "sample_rate": sample_rate,
                     "fps": fps,
                     "device": device,
-                    "usb_port": resolved_usb_port,
                 }
+                #
+                asyncio.run(camera_shutter(CONNECTED_GOPROS, action))
+                if not deactivate_ports(CONNECTED_USB_PORTS):
+                    log.warning("Ports could not be deactivated")
+                    return
                 stop_event = Event()
                 generator = LTC_Generator(ltc_config, stop_event)
                 ltc_process = Thread(target=generator.run, daemon=True)
@@ -451,8 +458,10 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
                     p[1].set()
         else:
             asyncio.run(camera_shutter(CONNECTED_GOPROS, action))
-        #TODO create test for available usb connections after port reconnect
         if action == "stop":
+            if not last_timecode_flag and not activate_ports(CONNECTED_USB_PORTS):
+                log.warning("Ports could not be activated")
+                return
             fetch_process = Process(target=fetch_recorded, args=(CONNECTED_SERIALS, save_path, log), daemon=False)
             fetch_process.start()
     except RuntimeError as e:
@@ -473,37 +482,6 @@ def _exit_handler() -> None:
     log.info("Closing all connections")
     global CONNECTED_GOPROS
     asyncio.run(close_gopros(gopros=CONNECTED_GOPROS))
-
-def get_usbport_by_ip(gopro_ip: str) -> str | None:
-    net_dir = "/sys/class/net"
-    if not os.path.exists(net_dir):
-        return None
-
-    for interface in os.listdir(net_dir):
-        device_link = os.path.join(net_dir, interface, "device")
-        if not os.path.islink(device_link):
-            continue
-        
-        real_path = os.path.realpath(device_link)
-        if "usb" not in real_path:
-            continue
-
-        match = re.search(r'/usb\d+/([^/:\s]+)', real_path)
-        if not match:
-            continue
-
-        usb_port = match.group(1)
-
-        try:
-            output = subprocess.check_output(["ip", "route", "show", "dev", interface], text=True)
-
-            subnet_prefix = ".".join(gopro_ip.split(".")[:2])
-            if subnet_prefix in output:
-                return usb_port
-        except subprocess.SubprocessError:
-            continue
-
-    return None
 
 
 atexit.register(_exit_handler)
