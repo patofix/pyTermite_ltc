@@ -17,29 +17,43 @@ import atexit
 import enum
 import logging
 import shlex
+import os
 from pathlib import Path
 from multiprocessing import Process, Event
-
 import click
 import structlog
 from click_help_colors import HelpColorsGroup
+import time
 
 from pytermite.commands import camera_shutter
 from pytermite.config import LOG_LEVEL
 from pytermite.connection import (
+    COHN_DB,
     WiredConnection,
+    WirelessConnection,
     close_gopros,
     connect_gopros,
+    connect_gopros_wireless,
+    connect_gopros_cohn,
     create_wired_gopros,
+    create_wireless_gopros,
+    create_cohn_gopros,
+    load_cohn_identifiers,
     scan_for_gopros,
+    scan_for_gopros_wireless,
 )
 from pytermite.utils import load_serial_numbers_from_json
-from pytermite.lineartimecode_two import LTC_Generator
+from pytermite.lineartimecode_two import LTC_Generator, start_LTC_Decoder, decode_timecode_batch
+from pytermite.fetch_data import fetch_filenames, fetch_recorded
 from pytermite.preview_stream import PreviewStream
 
+os.environ["LANG"] = "en_US"
+
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
-GOPROS: dict[str, WiredConnection] = {}
-CONNECTED_GOPROS: set[WiredConnection] = set()
+GOPROS: dict[(str, str), WiredConnection] = {}
+BLES: dict[str, WirelessConnection] = {}
+COHN: dict[str, WirelessConnection] = {}
+CONNECTED_GOPROS: set[WiredConnection | WirelessConnection] = set()
 CONNECTED_SERIALS: dict[str, str] | set[str] | None = None
 KEEP_OPEN = False
 
@@ -273,6 +287,7 @@ def scan(timeout: int) -> None:  # numpydoc ignore=GL03
         How long to wait for discovery in seconds.
     """
     asyncio.run(scan_for_gopros(waiting_time=timeout))
+    asyncio.run(scan_for_gopros_wireless(waiting_time=timeout))
     if KEEP_OPEN:
         _run_repl(click.get_current_context())
 
@@ -293,6 +308,23 @@ def scan(timeout: int) -> None:  # numpydoc ignore=GL03
     metavar="<str>",
 )
 @click.option(
+    "--ble",
+    "-b",
+    help="BLE names of GoPro cameras to connect to. Sperated by commas.",
+    envvar="PYTERMITE_BLES",
+    show_envvar=True,
+    metavar="<str>",
+)
+@click.option(
+    "--cohn",
+    "-c",
+    is_flag=True,  # <--- Added is_flag=True
+    default=False,
+    help="Using provisioned COHN devices only.",
+    envvar="PYTERMITE_COHN",
+    show_envvar=True,
+)
+@click.option(
     "--serials-file",
     "-f",
     type=click.Path(exists=True),
@@ -303,7 +335,7 @@ def scan(timeout: int) -> None:  # numpydoc ignore=GL03
     metavar="<str>",
 )
 def connect(
-    auto: bool, serials: str | None, serials_file: str | None
+    auto: bool, serials: str | None, serials_file: str | None, ble: str | None, cohn: bool, cohn_db: str = COHN_DB,
 ) -> None:  # numpydoc ignore=GL03
     """
     Connect to one or more GoPro devices using the selected discovery method.
@@ -320,14 +352,41 @@ def connect(
         Path to a JSON file containing serials.
     """
     global GOPROS
+    global BLES
+    global COHN
     global CONNECTED_SERIALS
     log = logger.bind(command="connect")
     serial_numbers: dict[str, str] | set[str] | None = None
+    ble_names: dict[str, str] | set[str] | None = None
+    cohn_identifiers: set[str] = set()
+    cohn_db = Path(cohn_db)
     if auto:
         log = log.bind(option="auto")
         if len(GOPROS) == 0:
             log.info("Searching for connected GoPro cameras via USB connection...")
             serial_numbers = asyncio.run(scan_for_gopros(waiting_time=5))
+
+        # load cohn database
+        cohn_identifiers = load_cohn_identifiers(cohn_db)
+        
+        if cohn_identifiers:
+            log.info(
+                "Found cameras already provisioned for COHN; connecting "
+                "directly without BLE...",
+                count=len(cohn_identifiers),
+                identifiers=sorted(cohn_identifiers),
+            )
+        if len(BLES) == 0:
+            log.info("Searching for additional GoPro cameras via BLE connection...")
+            discovered_ble = asyncio.run(scan_for_gopros_wireless(waiting_time=10))
+            ble_names = discovered_ble - cohn_identifiers
+            skipped = discovered_ble & cohn_identifiers
+            if skipped:
+                log.info(
+                    "Skipping BLE provisioning for cameras already "
+                    "provisioned for COHN",
+                    identifiers=sorted(skipped),
+                )
         else:
             log.info("Using previously discovered GoPro cameras to connect...")
             pass
@@ -341,6 +400,23 @@ def connect(
             "Loading serial numbers from provided file to connect to GoPro cameras...",
         )
         serial_numbers = load_serial_numbers_from_json(serials_file)
+    elif ble:
+        log = log.bind(option="ble")
+        log.info("Using provided ble names to connect to GoPro cameras...")
+        ble_names = {n.strip() for n in ble.split(",")}
+    elif cohn:
+        log = log.bind(option="cohn")
+        log.info("Using just provisioned COHN devices...")
+        # load cohn database
+        cohn_identifiers = load_cohn_identifiers(cohn_db)
+        
+        if cohn_identifiers:
+            log.info(
+                "Found cameras already provisioned for COHN; connecting "
+                "directly without BLE...",
+                count=len(cohn_identifiers),
+                identifiers=sorted(cohn_identifiers),
+            )
     else:
         raise click.UsageError(
             "Please specify a connection method: --auto, --serials, or --serials-file.",
@@ -349,15 +425,48 @@ def connect(
         log.debug("Serial numbers to connect to: %s", serial_numbers)
     else:
         serial_numbers = set()
+        # for gp in (val for (key1, key2), val in GOPROS.items() if key2 == "target_value"):
         for gp in GOPROS.values():
             if isinstance(gp, WiredConnection):
                 if gp.serial is not None:
                     serial_numbers.add(gp.serial)
         log.debug("Serial numbers to connect to: %s", serial_numbers)
+
+    if ble_names:
+        log.debug("BLE names to connect to: %s", ble_names)
+    else:
+        ble_names = set()
+        for gp in BLES.values():
+            if isinstance(gp, WirelessConnection):
+                if gp.identifier is not None:
+                    ble_names.add(gp.identifier)
+
+    if cohn_identifiers:
+        log.info("COHN identifiers to connect to: %s", cohn_identifiers)
+
+    log.info(f"Using USB: {serial_numbers}")
+    log.info(f"Using BLE: {ble_names}")
+    log.info(f"Using COHN: {cohn_identifiers}")
+
+    # TODO: add wireless gopros
+    CONNECTED_SERIALS = serial_numbers
     GOPROS = create_wired_gopros(gopro_serials=serial_numbers)
+    BLES = create_wireless_gopros(gopro_names=ble_names)
+    # cohn_db
+    COHN = create_cohn_gopros(identifiers=cohn_identifiers, cohn_db_path=cohn_db)
     CONNECTED_SERIALS = serial_numbers
     asyncio.run(_connect_to_gopros())
-    log.info("Connected to all requested GoPro cameras")
+    failed = {**GOPROS, **BLES, **COHN}
+    if failed:
+        log.warning(
+            f"Failed to connect to {len(failed)} of "
+            f"{len(GOPROS) + len(BLES) + len(COHN) + len(CONNECTED_GOPROS)} requested camera(s): "
+            f"{sorted(failed)}"
+        )
+    if CONNECTED_GOPROS:
+        log.info(f"Connected to {len(CONNECTED_GOPROS)} GoPro camera(s)")
+    else:
+        log.error("Failed to connect to any requested GoPro cameras")
     # When running inside the interactive shell the process will stay alive
     # and the user can call `disconnect` from the same shell. If invoked
     # directly from a single-shot process the CLI will exit as before.
@@ -367,10 +476,16 @@ def connect(
 
 async def _connect_to_gopros() -> None:
     """Connect to all GoPro objects stored in the global ``GOPROS`` mapping."""
-    global GOPROS, CONNECTED_GOPROS
+    global GOPROS, BLES, COHN, CONNECTED_GOPROS
+    async for gopro in connect_gopros_cohn(gopros=COHN):
+        CONNECTED_GOPROS.add(gopro)
+        _ = COHN.pop(gopro.identifier, None)
     async for gopro in connect_gopros(gopros=GOPROS):
         CONNECTED_GOPROS.add(gopro)
         _ = GOPROS.pop(await gopro.name, None)
+    async for gopro in connect_gopros_wireless(gopros=BLES):
+        CONNECTED_GOPROS.add(gopro)
+        _ = BLES.pop(gopro.identifier, None)
 
 
 @cli.command()
@@ -387,8 +502,10 @@ def disconnect() -> None:
     global CONNECTED_SERIALS
     asyncio.run(close_gopros(gopros=CONNECTED_GOPROS))
     CONNECTED_SERIALS = None
+    CONNECTED_GOPROS = set()
     if KEEP_OPEN:
         _run_repl(click.get_current_context())
+
 
 ltc_processes = []
 last_timecode_flag = False
@@ -420,6 +537,7 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
     global ltc_processes
     global last_timecode_flag
     global CONNECTED_GOPROS
+    global CONNECTED_SERIALS
     no_timecode = last_timecode_flag if action == "stop" else no_timecode
     last_timecode_flag = (no_timecode if device is not None else True) if action == "start" else last_timecode_flag
     try:
@@ -432,16 +550,53 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
                 }
                 stop_event = Event()
                 ltc_process = Process(
-                    target=run_generator,
+                    target=_run_generator,
                     args=(ltc_config, stop_event)
                 )
                 ltc_process.start()
                 ltc_processes.append((ltc_process, stop_event))
+                time.sleep(3)
             elif action == "stop":
                 for p in ltc_processes:
                     p[1].set()
-        else:
-            asyncio.run(camera_shutter(CONNECTED_GOPROS, action))
+        asyncio.run(camera_shutter(CONNECTED_GOPROS, action))
+        if action == "stop":
+            fetch_process = Process(target=fetch_filenames, args=(CONNECTED_SERIALS, CONNECTED_GOPROS, log), daemon=False)
+            fetch_process.start()
+    except RuntimeError as e:
+        log.error(str(e))
+    if KEEP_OPEN:
+        _run_repl(click.get_current_context())
+
+@cli.command()
+@click.option('--save_path', default=None, type=click.Path())
+def fetchdata(save_path: str|None) -> None:
+    global CONNECTED_SERIALS
+    log = logger.bind(command="fetch_data")
+    try:
+        fetch_process = Process(target=fetch_recorded, args=(CONNECTED_SERIALS, save_path, log), daemon=False)
+        fetch_process.start()
+    except RuntimeError as e:
+        log.error(str(e))
+    if KEEP_OPEN:
+        _run_repl(click.get_current_context())
+
+decode_processes = []
+@cli.command()
+@click.option('--input_path', default=None, type=click.Path())
+@click.option('--fps', default=50, type=int)
+@click.argument("action", type=click.Choice(["start", "stop"]))
+def decode_path(action:str, input_path: str|None, fps:int) -> None:
+    global decode_processes
+    log = logger.bind(command="decode_path")
+    try:
+        if action == "start":
+            p = Process(target=decode_timecode_batch, args=([(input_path, fps)], 1,), daemon=False)
+            decode_processes.append(p)
+            p.start()
+        elif action == "stop":
+            for p in decode_processes:
+                p.terminate()
     except RuntimeError as e:
         log.error(str(e))
     if KEEP_OPEN:
@@ -483,7 +638,7 @@ def run_preview(serials, stop_event, logger):
     stream = PreviewStream(serials, stop_event, logger)
     stream.preview_start()
 
-def run_generator(config, stop_event):
+def _run_generator(config, stop_event):
     generator = LTC_Generator(config, stop_event)
     generator.run()
 
