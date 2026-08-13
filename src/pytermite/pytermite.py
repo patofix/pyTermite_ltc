@@ -454,6 +454,7 @@ def disconnect() -> None:
 
 ltc_processes = []
 last_timecode_flag = False
+last_fps = None
 @cli.command()
 @click.option(
     "--no-timecode",
@@ -481,6 +482,7 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
     log = logger.bind(command="record")
     global ltc_processes
     global last_timecode_flag
+    global last_fps
     global CONNECTED_GOPROS
     global CONNECTED_SERIALS
     no_timecode = last_timecode_flag if action == "stop" else no_timecode
@@ -488,6 +490,7 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
     try:
         if not no_timecode and (device is not None or action == "stop"):
             if action == "start":
+                last_fps = fps
                 ltc_config = {
                     "sample_rate": sample_rate,
                     "fps": fps,
@@ -505,7 +508,7 @@ def record(action: str, no_timecode: bool, device: int, fps: int, sample_rate: i
                     p[1].set()
         asyncio.run(camera_shutter(CONNECTED_GOPROS, action))
         if action == "stop":
-            fetch_process = Process(target=fetch_filenames, args=(CONNECTED_SERIALS, CONNECTED_GOPROS, log), daemon=False)
+            fetch_process = Process(target=fetch_filenames, args=(CONNECTED_SERIALS, CONNECTED_GOPROS, last_fps, log), daemon=False)
             fetch_process.start()
     except RuntimeError as e:
         log.error(str(e))
@@ -534,7 +537,7 @@ def decode_path(action:str, input_path: str|None, fps:int) -> None:
     global decode_processes
     log = logger.bind(command="decode_path")
     try:
-        if action == "start":
+        if action == "start" and input_path is not None:
             p = Process(target=decode_timecode_batch, args=([(input_path, fps)], 1,), daemon=False)
             decode_processes.append(p)
             p.start()

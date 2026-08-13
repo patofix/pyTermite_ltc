@@ -14,6 +14,7 @@ import threading
 import queue
 import time
 import ffmpeg
+import multiprocessing
 
 position_map = {
     50: {
@@ -178,6 +179,9 @@ class LTC_Generator():
 class LTC_Decoder():
     def __init__(self):
         self.timecode_format = "HH:MM:SS:FF"
+        self.sync_word = np.array([
+            0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,1
+        ], dtype=np.uint8)
 
     def _extract_audio(self, input_path:str, wav_path:str):
         ffmpeg.input(input_path).output(wav_path, vn=None).run(overwrite_output=True)
@@ -209,7 +213,8 @@ class LTC_Decoder():
         return total_units + total_tens * 10
             
 
-    def decode_ltc(self, input_path:str, fps:int):
+    def decode_ltc(self, input_path:Path|str, fps:int):
+        input_path = str(input_path)
         base_path = ".".join(input_path.split(".")[:-1])
         audio_path = f"{base_path}.wav"
         video_path = f"{base_path}_timecode.mp4"
@@ -255,12 +260,8 @@ class LTC_Decoder():
         labels[is_zero] = 0
         labels[is_one] = 1
 
-        sync_word = np.array([
-            0,0,1,1,1,1,1,1,1,1,1,1,1,1,0,1
-        ], dtype=np.uint8)
-        
         window = np.lib.stride_tricks.sliding_window_view(labels, window_shape=16)
-        sync_pos = np.nonzero(np.all(window == sync_word, axis=1))[0]
+        sync_pos = np.nonzero(np.all(window == self.sync_word, axis=1))[0]
         frame_starts = sync_pos - 80 + 16
         valid_starts = frame_starts[(frame_starts >= 0) & (frame_starts + 80 <= len(labels))]
         indices = valid_starts[:, None] + np.arange(80)
@@ -305,11 +306,13 @@ def decode_timecode_batch(decode_tasks:list, max_processes=8):
         if result[1]: continue
         print(f"Error when decoding: {result[0]}")
 
-def start_LTC_Decoder(input_path:str, fps=50):
+def start_LTC_Decoder(input_path:str|Path, fps=50):
     success = False
     try:
         decoder = LTC_Decoder()
         decoder.decode_ltc(input_path, fps)
         success = True
+    except Exception as e:
+        print(e)
     finally:
         return (input_path, success)

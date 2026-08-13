@@ -18,6 +18,7 @@ save_path = Path(__file__).parent / "tmp"
 
 def fetch_filenames(serials: dict[str, str] | set[str] | None = None,
                     gopros: set[WiredConnection | WirelessConnection]  | None = None,
+                    fps: int = 50,
                     logger = None
     ):
     logger_available = logger is not None
@@ -48,10 +49,12 @@ def fetch_filenames(serials: dict[str, str] | set[str] | None = None,
                 os.unlink(cert_path)
             
             if response_last.status_code == 200:
+                entry_json = response_last.json()
+                entry_json["fps"] = fps
                 if not connection._identifier in saved_entries:
-                    saved_entries[connection._identifier] = [response_last.json()]
+                    saved_entries[connection._identifier] = [entry_json]
                 else:
-                    saved_entries[connection._identifier].append(response_last.json())
+                    saved_entries[connection._identifier].append(entry_json)
                 _save_entries(saved_entries)
             else:
                 logger.warning(f"Last captured of wireless {connection._identifier} could not be saved!")
@@ -63,10 +66,12 @@ def fetch_filenames(serials: dict[str, str] | set[str] | None = None,
             url_last = f"http://{ip}/gopro/media/last_captured"    
             response_last = requests.request("GET", url_last)
             if response_last.status_code == 200:
+                entry_json = response_last.json()
+                entry_json["fps"] = fps
                 if not cam_id in saved_entries:
-                    saved_entries[cam_id] = [response_last.json()]
+                    saved_entries[cam_id] = [entry_json]
                 else:
-                    saved_entries[cam_id].append(response_last.json())
+                    saved_entries[cam_id].append(entry_json)
                 _save_entries(saved_entries)
             else:
                 logger.warning(f"Last captured of {cam_id} could not be saved!")
@@ -126,7 +131,8 @@ def fetch_recorded( serials: dict[str, str] | set[str] | None = None,
                 save_path_cam,
                 entry["file"],
                 cam_id,
-                idx
+                idx,
+                entry["fps"]
             ))
 
     with multiprocessing.Pool(processes=max_processes) as pool:
@@ -134,9 +140,9 @@ def fetch_recorded( serials: dict[str, str] | set[str] | None = None,
     
     delete_dict = {}
     saved_video_paths = []
-    for cam_id, idx, success, save_path_cam in results:
+    for cam_id, idx, success, save_path_cam, fps in results:
         if not success: continue
-        saved_video_paths.append((f"{save_path_cam[0]}/{save_path_cam[1]}", 50))
+        saved_video_paths.append(Path(save_path_cam[0]) / save_path_cam[1], fps)
         if not cam_id in delete_dict:
             delete_dict[cam_id] = [idx]
         else:
@@ -151,7 +157,7 @@ def fetch_recorded( serials: dict[str, str] | set[str] | None = None,
 
     Process(target=decode_timecode_batch, args=(saved_video_paths,max_processes,), daemon=False).start()
 
-def _fetch_recoding(url, save_path_cam, filename, cam_id, idx):
+def _fetch_recoding(url, save_path_cam, filename, cam_id, idx, fps):
     response = requests.request("GET", url, stream=True)
     if response.status_code == 200:
         os.makedirs(save_path_cam, exist_ok=True)
@@ -160,7 +166,7 @@ def _fetch_recoding(url, save_path_cam, filename, cam_id, idx):
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
         logger.info(f"Saved to {save_path_cam}")
-    return (cam_id, idx, response.status_code == 200, (save_path_cam, filename))   
+    return (cam_id, idx, response.status_code == 200, (save_path_cam, filename), fps)   
 
 def _get_saved_entries() -> dict:
     global tmp_file
