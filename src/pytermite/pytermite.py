@@ -610,13 +610,15 @@ def preview_stream(action: str) -> None:
     global CONNECTED_SERIALS
     global preview_processes
     try:
-        cams_available = CONNECTED_SERIALS is not None and len(CONNECTED_SERIALS) > 0
+        #cams_available = CONNECTED_SERIALS is not None and len(CONNECTED_SERIALS) > 0
+        cams_available = True
         if action == "start" and cams_available:
             stop_event = asyncio.Event()
             preview_process = Process(
-                target=run_preview,
-                 args=(CONNECTED_SERIALS, stop_event, log)
+                target=_run_preview,
+                 args=(CONNECTED_GOPROS, stop_event, log)
             )
+            preview_process.start()
             preview_processes.append((preview_process, stop_event))
         elif action == "stop":
             delete_list = []
@@ -634,9 +636,12 @@ def preview_stream(action: str) -> None:
     if KEEP_OPEN:
         _run_repl(click.get_current_context())
 
-def run_preview(serials, stop_event, logger):
+def _run_preview(serials, stop_event, logger):
+    print("ENTER")
     stream = PreviewStream(serials, stop_event, logger)
+    print("CREATED STREAM")
     stream.preview_start()
+    print("STARTED STREAM")
 
 def _run_generator(config, stop_event):
     generator = LTC_Generator(config, stop_event)
