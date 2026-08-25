@@ -22,6 +22,7 @@ import traceback
 from collections.abc import AsyncGenerator
 from typing import Any
 import tempfile
+import logging
 
 import click
 import requests
@@ -30,7 +31,7 @@ from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 from open_gopro import WiredGoPro, WirelessGoPro
-from open_gopro.domain.exceptions import ResponseTimeout
+from open_gopro.domain.exceptions import GoProError, ResponseTimeout
 from open_gopro.models.proto import EnumCOHNNetworkState, EnumCOHNStatus
 from zeroconf import ServiceListener, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo
@@ -44,11 +45,16 @@ from pytermite.utils import (
     serialize_dict,
 )
 
+# suppress bluetooth connection errors
+logging.getLogger("open_gopro").setLevel(logging.ERROR)
+logging.getLogger("open_gopro.ble.adapters").setLevel(logging.ERROR)
+logging.getLogger("open_gopro.ble.adapters.bleak_wrapper").setLevel(logging.ERROR)
+
 logger = structlog.get_logger()
 
 GOPROS: set[str] = set()
 BLES: set[str] = set()
-INTERRUPT = asyncio.Event()
+INTERRUPT: asyncio.Event
 SERIALS_PATH = resolve_config_path(
     "PYTERMITE_SERIALS_PATH",
     default_filename="serials.json",
@@ -144,37 +150,44 @@ def make_gopro_request(
         Response created by made request,
         None if no valid connection is provided
     """
-    respose = None
-    if isinstance(connection, WirelessConnection):
-        if connection.cohn.credentials is None:
-            logger.warning("Connection does not have Cohn credentials.")
-            return
-        url = f"https://{connection.ip_address}/{request_path}"
-        cert_string = connection.cohn.credentials.certificate
+    response = None
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", delete=False, suffix=".pem"
-        ) as f:
-            f.write(cert_string)
-            cert_path = f.name
+    if connection.is_open:
 
-        auth = (
-            connection.cohn.credentials.username,
-            connection.cohn.credentials.password,
-        )
-        try:
-            response = requests.request(
-                "GET", url, verify=cert_path, auth=auth, timeout=timeout
+        if isinstance(connection, WirelessConnection):
+            if connection.cohn.credentials is None:
+                logger.warning("Connection does not have Cohn credentials.")
+                return
+            url = f"https://{connection.ip_address}/{request_path}"
+            cert_string = connection.cohn.credentials.certificate
+
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".pem"
+            ) as f:
+                f.write(cert_string)
+                cert_path = f.name
+
+            auth = (
+                connection.cohn.credentials.username,
+                connection.cohn.credentials.password,
             )
-        finally:
-            Path(cert_path).unlink()
+            try:
+                response = requests.request(
+                    "GET", url, verify=cert_path, auth=auth, timeout=timeout
+                )
+            except requests.ConnectTimeout:
+                logger.warning("Connection timed out while making request",
+                               connection=connection.identifier, request_path=request_path)
+            finally:
+                Path(cert_path).unlink()
 
-    elif isinstance(connection, WiredConnection):
-        try:
-            url = f"http://{connection.ip_address}/{request_path}"
-            response = requests.request("GET", url, timeout=timeout)
-        except:
-            pass
+        elif isinstance(connection, WiredConnection):
+            try:
+                url = f"http://{connection.ip_address}/{request_path}"
+                response = requests.request("GET", url, timeout=timeout)
+            except:
+                pass
+
     return response
 
 
@@ -418,6 +431,8 @@ async def connect_gopros_wireless(
                 )
                 await logger.adebug(result, cam_name=cam_name)
 
+            # close BLE connection to avoid conflicts with COHN
+            await gopro._close_ble()
             yield gopro
 
         except ResponseTimeout as e:
@@ -428,6 +443,12 @@ async def connect_gopros_wireless(
         except Exception as e:
             await logger.aerror(
                 f"Failed to connect to GoPro {cam_name}",
+                error=str(e),
+            )
+
+        except GoProError as e:
+            await logger.aerror(
+                f"Failed to find GoPro {cam_name}",
                 error=str(e),
             )
 
@@ -524,6 +545,8 @@ async def close_gopros(
                 cam_serial=gopro.identifier,
             )
         elif isinstance(gopro, WirelessConnection):
+            if gopro.is_ble_connected and gopro._ble is not None:
+                print(f"Shouldnt be connected via BLE")
             await gopro.close()
             logger.debug(
                 f"Disconnected from {gopro.identifier}",
@@ -639,6 +662,7 @@ async def scan_for_gopros(
         raise ValueError("At least one of usb or bluetooth must be True")
 
     global GOPROS, BLES, INTERRUPT
+    INTERRUPT = asyncio.Event()
     tasks: list[asyncio.Task[None]] = []
     # reset state for each invocation
     GOPROS = set()
