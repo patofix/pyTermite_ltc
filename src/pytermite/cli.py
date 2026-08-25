@@ -50,6 +50,8 @@ from pytermite.lineartimecode import (
 )
 from pytermite.utils import load_serial_numbers_from_json
 
+from open_gopro.models.constants import StatusId
+
 os.environ["LANG"] = "en_US"
 
 LOG_LEVEL = PYTERMITE_LOG_LEVEL
@@ -576,7 +578,19 @@ def list_connected() -> None:
     log.debug("Listing connected GoPro cameras")
     global CONNECTED_GOPROS
     for gopro in CONNECTED_GOPROS:
-        print("GoPro: ", gopro.identifier)
+
+        # check connection and retrieve information
+        try:
+            state = asyncio.run(gopro.http_command.get_camera_state())
+            battery = state.data.get(StatusId.INTERNAL_BATTERY_PERCENTAGE, "Unknown")
+
+            print("GoPro: ", gopro.identifier, "\tBattery: ", battery)
+
+        except Exception as e:
+            continue
+
+
+        # print("GoPro: ", gopro.identifier)
 
 
 @cli.command()

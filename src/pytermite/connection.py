@@ -125,7 +125,7 @@ def make_gopro_request(
     connection: WirelessConnection | WiredConnection,
     request_path: str,
     timeout: int = 10,
-) -> Response | None:
+) -> requests.Response | None:
     """
     Make GET request to provided GoPro Connection
 
