@@ -667,7 +667,10 @@ async def scan_for_gopros(
                 result, asyncio.CancelledError
             ):
                 raise result
-        await logger.ainfo(f"Found {len(GOPROS)} devices")
+        if usb:
+            await logger.ainfo(f"Found {len(GOPROS)} devices")
+        if bluetooth:
+            await logger.ainfo(f"Found {len(BLES)} devices")
         INTERRUPT.clear()
     return GOPROS, BLES
 
