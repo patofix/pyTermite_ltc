@@ -16,6 +16,7 @@ import multiprocessing
 import pathlib
 import queue
 import threading
+from ctypes import _CData
 
 import ffmpeg
 import numpy as np
@@ -180,7 +181,10 @@ class LTCGenerator:
             samples = self.sample_word(word)
             self.frame_queue.put(np.array(samples, dtype=np.float32))
 
-    def callback(self, outdata: np.ndarray) -> None:
+    # ruff: ignore[ARG002]
+    def callback(
+        self, outdata: np.ndarray, frames: int, time: _CData, status: sd.CallbackFlags
+    ) -> None:
         """Retrieve the next LTC frame from the queue and write to the output buffer."""
         try:
             outdata[:, 0] = self.frame_queue.get_nowait()
