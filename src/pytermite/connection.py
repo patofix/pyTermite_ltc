@@ -18,10 +18,10 @@ import os
 import pathlib
 import re
 import sys
+import tempfile
 import traceback
 from collections.abc import AsyncGenerator
 from typing import Any
-import tempfile
 
 import click
 import requests
@@ -120,11 +120,12 @@ class WirelessConnection(WirelessGoPro):
 
     #     return self.identifier
 
+
 def make_gopro_request(
     connection: WirelessConnection | WiredConnection,
     request_path: str,
-    timeout: int = 10
-    ) -> Response | None:
+    timeout: int = 10,
+) -> Response | None:
     """
     Make GET request to provided GoPro Connection
 
@@ -147,13 +148,11 @@ def make_gopro_request(
     if isinstance(connection, WirelessConnection):
         if connection.cohn.credentials is None:
             logger.warning("Connection does not have Cohn credentials.")
-            return
+            return None
         url = f"https://{connection.ip_address}/{request_path}"
         cert_string = connection.cohn.credentials.certificate
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", delete=False, suffix=".pem"
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as f:
             f.write(cert_string)
             cert_path = f.name
 

@@ -69,13 +69,13 @@ class LTCGenerator:
         self.next_level_sign = -1
         self.frame_queue: queue.Queue = queue.Queue(maxsize=self.fps)
         self.info = StreamInfo(
-                name='LtcStream',
-                type='Audio',
-                channel_count=1,
-                nominal_srate=self.sample_rate,
-                channel_format='float32',
-                source_id='ltc_audio_stream'
-                )
+            name="LtcStream",
+            type="Audio",
+            channel_count=1,
+            nominal_srate=self.sample_rate,
+            channel_format="float32",
+            source_id="ltc_audio_stream",
+        )
         self.outlet = StreamOutlet(self.info)
 
     def play_control_sound(self, filename: str, amplification: float = 1.0) -> None:
