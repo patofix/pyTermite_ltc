@@ -12,11 +12,9 @@ using multiprocessing, and is done using wired connections to the cameras.
 
 import json
 import multiprocessing
-import tempfile
 import time
 from pathlib import Path
 
-import requests
 import structlog
 
 from pytermite.config import PYTERMITE_LOG_LEVEL
@@ -31,6 +29,7 @@ FETCH_RECORDINGS = resolve_config_path(
     "PYTERMITE_FETCH_RECORDINGS_PATH",
     default_filename="fetch_recordings.json",
 )
+
 
 def fetch_filenames(
     gopros: set[WiredConnection | WirelessConnection] | None = None,
@@ -67,8 +66,7 @@ def fetch_filenames(
             _save_entries(saved_entries)
         else:
             logger.warning(
-                f"Last captured of {connection._identifier} could not be "
-                f"saved!"
+                f"Last captured of {connection._identifier} could not be saved!"
             )
 
 
@@ -134,11 +132,12 @@ def fetch_recorded(
         for idx, entry in enumerate(entry_list):
             for _ in range(allowed_retries):
                 response_info = make_gopro_request(
-                        connected_cams[cam_id],
-                        f"gopro/media/info?path={entry['folder']}/{entry['file']}"
-                    )
-                if response_info.status_code == 200: break
-                else: time.sleep(1)
+                    connected_cams[cam_id],
+                    f"gopro/media/info?path={entry['folder']}/{entry['file']}",
+                )
+                if response_info.status_code == 200:
+                    break
+                time.sleep(1)
             else:
                 logger.warning(
                     f"Timeout: Data of {cam_id} could not be fetched. Filename: "
@@ -185,7 +184,7 @@ def _fetch_recoding(
     save_path_cam: Path,
     filename: str,
     cam_id: str,
-    idx: int
+    idx: int,
 ) -> tuple[str, int, bool, tuple[Path, str]]:
     response = make_gopro_request(connection, request_path)
     if response.status_code == 200:
