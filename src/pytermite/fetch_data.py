@@ -148,7 +148,7 @@ def fetch_recorded(
 
             tasks.append(
                 (
-                    connected_cams[cam_id]
+                    connected_cams[cam_id],
                     f"videos/DCIM/{entry['folder']}/{entry['file']}",
                     save_path_cam,
                     entry["file"],
