@@ -46,7 +46,7 @@ logger = structlog.get_logger()
 
 GOPROS: set[str] = set()
 BLES: set[str] = set()
-INTERRUPT = asyncio.Event()
+INTERRUPT: asyncio.Event
 SERIALS_PATH = resolve_config_path(
     "PYTERMITE_SERIALS_PATH",
     default_filename="serials.json",
@@ -638,6 +638,7 @@ async def scan_for_gopros(
         raise ValueError("At least one of usb or bluetooth must be True")
 
     global GOPROS, BLES, INTERRUPT
+    INTERRUPT = asyncio.Event()
     tasks: list[asyncio.Task[None]] = []
     # reset state for each invocation
     GOPROS = set()
