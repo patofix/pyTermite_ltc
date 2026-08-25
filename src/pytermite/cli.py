@@ -19,6 +19,7 @@ import logging
 import os
 import shlex
 import time
+from tabulate import tabulate
 from multiprocessing import Event, Process
 from multiprocessing.synchronize import Event as SyncEvent
 from pathlib import Path
@@ -567,6 +568,41 @@ async def _connect_to_gopros() -> None:
             "variables are not set: PYTERMITE_COHN_SSID and "
             "PYTERMITE_COHN_PASSWORD."
         )
+
+
+@cli.command()
+def list_settings() -> None:
+    """List current settings and environment variables."""
+    log = logger.bind(command="list_settings")
+    log.debug("Listing current settings and environment variables")
+
+    async def fetch_all_settings():
+        tasks = [camera.http_command.get_camera_state() for camera in CONNECTED_GOPROS]
+        friendly_name = [camera.identifier for camera in CONNECTED_GOPROS]
+        return await asyncio.gather(*tasks), friendly_name
+
+    responses, friendly_name = asyncio.run(fetch_all_settings())
+
+    for friendly_name, resp in zip(friendly_name, responses):
+        print(f"GoPro: {friendly_name}")
+
+        # convert GoProResp data into a list of [Setting, Value] pairs
+        if resp.data:
+            # only settings are shown (otherwise: show all or StatusId.)
+            state_data = {
+                k: v for k, v in resp.data.items() 
+                if str(k).startswith("SettingId.")
+            }
+        else:
+            state_data = {}
+
+        table_data = [
+            [str(key).split(".")[-1], str(val)] 
+            for key, val in state_data.items()
+        ]
+
+        # Formats cleanly in terminal grid layout
+        print(tabulate(table_data, headers=["Setting", "Value"], tablefmt="fancy_grid"))
 
 
 @cli.command()

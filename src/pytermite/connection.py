@@ -35,6 +35,8 @@ from open_gopro.models.proto import EnumCOHNNetworkState, EnumCOHNStatus
 from zeroconf import ServiceListener, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo
 
+from pathlib import Path
+
 from pytermite.config import resolve_config_path
 from pytermite.utils import (
     load_serial_numbers_from_json,
@@ -79,7 +81,6 @@ class WiredConnection(WiredGoPro):
         super().__init__(**kwargs)
         self._name: str | None = name
         self.serial = self._serial
-        self.ip_address = f"172.2{serial_nr[-3]}.1{serial_nr[-2:]}.51:8080"
         self._identifier = self.serial[-4:]
 
     @property
@@ -124,7 +125,7 @@ def make_gopro_request(
     connection: WirelessConnection | WiredConnection,
     request_path: str,
     timeout: int = 10
-    ) -> Response | None:
+    ) -> requests.Response | None:
     """
     Make GET request to provided GoPro Connection
 
