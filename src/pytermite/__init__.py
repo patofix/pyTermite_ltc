@@ -19,6 +19,7 @@ Examples
 import asyncio
 import os
 import pathlib
+import sys
 from importlib.metadata import PackageNotFoundError, version
 
 import structlog
@@ -41,16 +42,16 @@ except PackageNotFoundError:
 def _set_environment() -> None:
     config_path = os.environ.get("PYTERMITE_CONFIG_PATH")
     if not config_path:
-        if os.name == "nt":
+        if sys.platform == "win32":
             base = (
                 os.environ.get("APPDATA")
                 or pathlib.Path(r"~\AppData\Roaming").expanduser()
             )
             path = pathlib.Path(base).expanduser() / "pytermite"
-        elif os.name == "posix":
+        elif sys.platform == "linux" or sys.platform == "darwin":
             path = pathlib.Path("~/.pytermite").expanduser()
         else:
-            logger.warning("Unsupported operating system: %s.", os.name)
+            logger.warning("Unsupported operating system: %s.", sys.platform)
             path = pathlib.Path("pytermite").expanduser()
         logger.debug("Setting PYTERMITE_CONFIG_PATH environment variable to %s.", path)
         path.mkdir(parents=True, exist_ok=True)

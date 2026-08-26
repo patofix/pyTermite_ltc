@@ -538,7 +538,7 @@ async def _wait_for_user_interrupt_windows() -> None:
     Polls ``msvcrt`` in short intervals so task cancellation is handled
     cooperatively by the event loop.
     """
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         while True:
@@ -597,12 +597,12 @@ async def wait_for_user_interrupt() -> None:
     except RuntimeError:
         print("Waiting for user input (press Enter)...")
 
-    if os.name == "nt":
+    if sys.platform == "win32":
         await _wait_for_user_interrupt_windows()
-    elif os.name == "posix":
+    elif sys.platform == "linux" or sys.platform == "darwin":
         await _wait_for_user_interrupt_unix()
     else:
-        logger.warning("Unsupported operating system: %s.", os.name)
+        logger.warning("Unsupported operating system: %s.", sys.platform)
 
     global INTERRUPT
     INTERRUPT.set()
