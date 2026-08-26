@@ -44,7 +44,9 @@ jobs:
       - name: Set up .env.test file
         run: |
           mkdir -p env
-          echo ${{ secrets.DOTENV_TEST }} > env/.env.test
+          cat > env/.env.test <<'EOF'
+          ${{ secrets.DOTENV_TEST }}
+          EOF
 
       - name: Install PortAudio
         run: |
