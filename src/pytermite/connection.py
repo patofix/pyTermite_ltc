@@ -168,6 +168,14 @@ def make_gopro_request(
             response = requests.request(
                 "GET", url, verify=cert_path, auth=auth, timeout=timeout
             )
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                f"Request failed for GoPro {connection.identifier} at {url}",
+                cam_serial=connection.identifier,
+                url=url,
+                error=str(e),
+            )
+            pass
         finally:
             pathlib.Path(cert_path).unlink()
 
@@ -175,7 +183,13 @@ def make_gopro_request(
         try:
             url = f"http://{connection.ip_address}/{request_path}"
             response = requests.request("GET", url, timeout=timeout)
-        except:
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                f"Request failed for GoPro {connection.identifier} at {url}",
+                cam_serial=connection.identifier,
+                url=url,
+                error=str(e),
+            )
             pass
     return response
 
