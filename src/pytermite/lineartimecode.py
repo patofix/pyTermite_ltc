@@ -11,11 +11,11 @@ write it into the metadata of the video file.
 #
 #  SPDX-License-Identifier: BSD-3-Clause
 
-import asyncio
 import multiprocessing
 import pathlib
 import queue
 import threading
+from multiprocessing.synchronize import Event as SyncEvent
 from typing import TYPE_CHECKING
 
 import ffmpeg
@@ -64,7 +64,7 @@ class LTCGenerator:
     includes a sync word for synchronization.
     """
 
-    def __init__(self, config: dict, stop_event: asyncio.Event) -> None:
+    def __init__(self, config: dict, stop_event: SyncEvent) -> None:
         self.stop_event = stop_event
         self.sample_rate = config["sample_rate"]
         self.fps = config["fps"]
