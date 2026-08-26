@@ -17,7 +17,7 @@ from pathlib import Path
 
 import structlog
 
-from pytermite.config import PYTERMITE_LOG_LEVEL
+from pytermite.config import PYTERMITE_LOG_LEVEL, resolve_config_path
 from pytermite.connection import WiredConnection, WirelessConnection, make_gopro_request
 
 structlog.configure(
@@ -135,7 +135,7 @@ def fetch_recorded(
                     connected_cams[cam_id],
                     f"gopro/media/info?path={entry['folder']}/{entry['file']}",
                 )
-                if response_info.status_code == 200:
+                if response_info and response_info.status_code == 200:
                     break
                 time.sleep(1)
             else:
@@ -179,7 +179,7 @@ def fetch_recorded(
 
 
 def _fetch_recoding(
-    connection: Wireless | WiredConnection,
+    connection: WirelessConnection | WiredConnection,
     request_path: str,
     save_path_cam: Path,
     filename: str,
@@ -187,12 +187,14 @@ def _fetch_recoding(
     idx: int,
 ) -> tuple[str, int, bool, tuple[Path, str]]:
     response = make_gopro_request(connection, request_path)
-    if response.status_code == 200:
+    status = False
+    if response and response.status_code == 200:
+        status = True
         Path(save_path_cam).mkdir(exist_ok=True, parents=True)
         with Path(save_path_cam / filename).open("wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-    return cam_id, idx, response.status_code == 200, (save_path_cam, filename)
+    return cam_id, idx, status, (save_path_cam, filename)
 
 
 def _get_saved_entries() -> dict:

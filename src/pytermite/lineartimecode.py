@@ -24,6 +24,7 @@ import sounddevice as sd
 import soundfile as sf
 import structlog
 from pylsl import StreamInfo, StreamOutlet
+from pylsl.lib import cf_float32
 
 from pytermite.config import PYTERMITE_LOG_LEVEL
 
@@ -74,7 +75,7 @@ class LTCGenerator:
             type="Audio",
             channel_count=1,
             nominal_srate=self.sample_rate,
-            channel_format="float32",
+            channel_format=cf_float32,
             source_id="ltc_audio_stream",
         )
         self.outlet = StreamOutlet(self.info)
