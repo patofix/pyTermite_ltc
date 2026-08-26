@@ -16,7 +16,7 @@ import multiprocessing
 import pathlib
 import queue
 import threading
-from ctypes import _CData
+from typing import TYPE_CHECKING
 
 import ffmpeg
 import numpy as np
@@ -27,6 +27,10 @@ from pylsl import StreamInfo, StreamOutlet
 from pylsl.lib import cf_float32
 
 from pytermite.config import PYTERMITE_LOG_LEVEL
+
+if TYPE_CHECKING:
+    from ctypes import _CData
+
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(PYTERMITE_LOG_LEVEL),
@@ -184,7 +188,7 @@ class LTCGenerator:
 
     # ruff: ignore[ARG002]
     def callback(
-        self, outdata: np.ndarray, frames: int, time: _CData, status: sd.CallbackFlags
+        self, outdata: np.ndarray, frames: int, time: "_CData", status: sd.CallbackFlags
     ) -> None:
         """Retrieve the next LTC frame from the queue and write to the output buffer."""
         try:
