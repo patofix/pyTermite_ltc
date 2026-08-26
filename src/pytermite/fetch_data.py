@@ -84,9 +84,9 @@ def fetch_recorded(
 
     Parameters
     ----------
-    serials : dict[str, str] | set[str] | None, optional
-        A dictionary containing camera serial numbers. If no cameras are
-        connected, the function will abort.
+    gopros : set[WiredConnection | WirelessConnection] | None, optional
+        A set of connected GoPro camera objects. If no cameras are connected,
+        the function will abort.
     save_path : str | Path | None, optional
         The path where the fetched videos will be saved. If not provided, defaults
         to the user's Downloads folder.
