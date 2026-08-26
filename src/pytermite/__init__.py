@@ -85,8 +85,13 @@ async def _is_bluetooth_available() -> None:
         os.environ["PYTERMITE_BLUETOOTH_AVAILABLE"] = "false"
 
 
-# Run the Bluetooth availability check asynchronously at module import time
-asyncio.run(_is_bluetooth_available())
+# Run the Bluetooth availability check at import time when safe.
+try:
+    loop = asyncio.get_running_loop()
+except RuntimeError:
+    asyncio.run(_is_bluetooth_available())
+else:
+    loop.create_task(_is_bluetooth_available())  # ruff: ignore[RUF006]
 
 import pytermite.commands as commands
 import pytermite.config as config
