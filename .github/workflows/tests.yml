@@ -46,6 +46,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Set up .env.test file
+        run: |
+          mkdir -p env
+          echo ${{ secrets.DOTENV_TEST }} > env/.env.test
+
       - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57
 
       - run: uv tool install tox --with tox-uv --with tox-gh-actions
