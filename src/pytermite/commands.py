@@ -21,7 +21,7 @@ import structlog
 
 from pytermite.config import PYTERMITE_LOG_LEVEL
 from pytermite.connection import WiredConnection, WirelessConnection
-from pytermite.utils import create_base_url, serialize_dict
+from pytermite.utils import serialize_dict
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(PYTERMITE_LOG_LEVEL),
@@ -102,7 +102,7 @@ async def get_preset_status(
     preset_state = {}
     for connection in connected_gopros:
         # Manual HTTP request as preset status is currently not working in open_gopro
-        url = create_base_url(connection.identifier) + "/presets/get"
+        url = f"http://{connection.ip_address}/gopro/camera/presets/get"
         # querystring = {"include-hidden": "0"}  # Currently not working
 
         global TIMEOUT
@@ -171,7 +171,7 @@ async def camera_shutter(
 
             else:
                 # Cameras controlled via USB
-                url = create_base_url(connection.identifier) + f"/shutter/{mode}"
+                url = f"http://{connection.ip_address}/gopro/camera/shutter/{mode}"
                 tasks.append(session.get(url))
 
         # Execute all requests concurrently
