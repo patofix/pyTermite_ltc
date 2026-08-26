@@ -104,7 +104,7 @@ def fetch_recorded(
     no files are marked for fetching, the function will also abort.
     """
     if gopros is None or len(gopros) < 1:
-        logger.warning("No GoPro Connection found! Fetching data aboarded...")
+        logger.warning("No GoPro Connection found! Fetching data aborted...")
         return
     connected_cams = {connection._identifier: connection for connection in gopros}
 
