@@ -79,8 +79,11 @@ class WiredConnection(WiredGoPro):
         super().__init__(**kwargs)
         self._name: str | None = name
         self.serial = self._serial
-        self.ip_address = f"172.2{serial_nr[-3]}.1{serial_nr[-2:]}.51:8080"
-        self._identifier = self.serial[-4:]
+        self._identifier: str | None = None
+        if self.serial is not None:
+            self._identifier = self.serial[-4:]
+        else:
+            logger.warning("Serial number could not be determined for WiredConnection.")
 
     @property
     async def name(self) -> str:
