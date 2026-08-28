@@ -653,7 +653,7 @@ def record(
         if action == "stop":
             fetch_process = Process(
                 target=fetch_filenames,
-                args=(CONNECTED_GOPROS),
+                args=(CONNECTED_GOPROS, ),
                 daemon=False,
             )
             fetch_process.start()
