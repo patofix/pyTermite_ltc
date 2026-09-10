@@ -738,6 +738,7 @@ def decode_path(action: str, input_path: str | None, fps: int) -> None:
 @click.argument("setting", type=str)
 @click.argument("option", type=str)
 def change_setting(identifier:str, setting:str, option:str):
+    return
     global CONNECTED_GOPROS
     log = logger.bind(command="change_setting")
     try:
