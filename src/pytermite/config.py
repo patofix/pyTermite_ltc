@@ -16,6 +16,7 @@ configuration files.
 import logging
 import os
 import pathlib
+import sys
 
 import structlog
 
@@ -33,7 +34,7 @@ def default_config_dir() -> pathlib.Path:
     if config_path:
         return pathlib.Path(config_path).expanduser()
 
-    if os.name == "nt":
+    if sys.platform == "win32":
         base = (
             os.environ.get("APPDATA") or pathlib.Path(r"~\AppData\Roaming").expanduser()
         )

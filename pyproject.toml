@@ -35,6 +35,7 @@ dependencies = [
     "numpy",
     "sounddevice",
     "soundfile",
+    "pylsl"
 ]
 
 [project.urls]

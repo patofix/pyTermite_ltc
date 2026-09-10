@@ -758,7 +758,7 @@ def change_setting(identifier:str, setting:str, option:str):
         _run_repl(click.get_current_context())
 
 
-def _run_generator(config: dict, stop_event: asyncio.Event) -> None:
+def _run_generator(config: dict, stop_event: SyncEvent) -> None:
     generator = LTCGenerator(config, stop_event)
     generator.run()
 

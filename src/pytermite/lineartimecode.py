@@ -11,11 +11,12 @@ write it into the metadata of the video file.
 #
 #  SPDX-License-Identifier: BSD-3-Clause
 
-import asyncio
 import multiprocessing
 import pathlib
 import queue
 import threading
+from multiprocessing.synchronize import Event as SyncEvent
+from typing import TYPE_CHECKING
 
 import ffmpeg
 import numpy as np
@@ -23,8 +24,13 @@ import sounddevice as sd
 import soundfile as sf
 import structlog
 from pylsl import StreamInfo, StreamOutlet
+from pylsl.lib import cf_float32
 
 from pytermite.config import PYTERMITE_LOG_LEVEL
+
+if TYPE_CHECKING:
+    from ctypes import _CData
+
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(PYTERMITE_LOG_LEVEL),
@@ -58,7 +64,7 @@ class LTCGenerator:
     includes a sync word for synchronization.
     """
 
-    def __init__(self, config: dict, stop_event: asyncio.Event) -> None:
+    def __init__(self, config: dict, stop_event: SyncEvent) -> None:
         self.stop_event = stop_event
         self.sample_rate = config["sample_rate"]
         self.fps = config["fps"]
@@ -69,13 +75,13 @@ class LTCGenerator:
         self.next_level_sign = -1
         self.frame_queue: queue.Queue = queue.Queue(maxsize=self.fps)
         self.info = StreamInfo(
-                name='LtcStream',
-                type='Audio',
-                channel_count=1,
-                nominal_srate=self.sample_rate,
-                channel_format='float32',
-                source_id='ltc_audio_stream'
-                )
+            name="LtcStream",
+            type="Audio",
+            channel_count=1,
+            nominal_srate=self.sample_rate,
+            channel_format=cf_float32,
+            source_id="ltc_audio_stream",
+        )
         self.outlet = StreamOutlet(self.info)
 
     def play_control_sound(self, filename: str, amplification: float = 1.0) -> None:
@@ -180,7 +186,10 @@ class LTCGenerator:
             samples = self.sample_word(word)
             self.frame_queue.put(np.array(samples, dtype=np.float32))
 
-    def callback(self, outdata: np.ndarray) -> None:
+    # ruff: ignore[ARG002]
+    def callback(
+        self, outdata: np.ndarray, frames: int, time: "_CData", status: sd.CallbackFlags
+    ) -> None:
         """Retrieve the next LTC frame from the queue and write to the output buffer."""
         try:
             outdata[:, 0] = self.frame_queue.get_nowait()

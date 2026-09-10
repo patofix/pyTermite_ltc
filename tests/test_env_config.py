@@ -5,7 +5,6 @@
 #
 #  SPDX-License-Identifier: BSD-3-Clause
 
-import dataclasses
 import warnings
 
 import pytest
@@ -34,10 +33,10 @@ def test_resolve_config_path_uses_env_directory(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_connect_to_gopros_reads_cohn_env_credentials(monkeypatch):
-    @dataclasses.dataclass
     class DummyWireless:
         def __init__(self, identifier: str):
             self.identifier = identifier
+            self.ip_address = ""
 
     wireless = DummyWireless("cam-42")
     captured: dict[str, str] = {}

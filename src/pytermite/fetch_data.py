@@ -12,11 +12,9 @@ using multiprocessing, and is done using wired connections to the cameras.
 
 import json
 import multiprocessing
-import tempfile
 import time
 from pathlib import Path
 
-import requests
 import structlog
 
 from pytermite.config import PYTERMITE_LOG_LEVEL, resolve_config_path
@@ -31,6 +29,7 @@ FETCH_RECORDINGS = resolve_config_path(
     "PYTERMITE_FETCH_RECORDINGS_PATH",
     default_filename="fetch_recordings.json",
 )
+
 
 def fetch_filenames(
     gopros: set[WiredConnection | WirelessConnection] | None = None,
@@ -67,8 +66,7 @@ def fetch_filenames(
             _save_entries(saved_entries)
         else:
             logger.warning(
-                f"Last captured of {connection._identifier} could not be "
-                f"saved!"
+                f"Last captured of {connection._identifier} could not be saved!"
             )
 
 
@@ -86,9 +84,9 @@ def fetch_recorded(
 
     Parameters
     ----------
-    serials : dict[str, str] | set[str] | None, optional
-        A dictionary containing camera serial numbers. If no cameras are
-        connected, the function will abort.
+    gopros : set[WiredConnection | WirelessConnection] | None, optional
+        A set of connected GoPro camera objects. If no cameras are connected,
+        the function will abort.
     save_path : str | Path | None, optional
         The path where the fetched videos will be saved. If not provided, defaults
         to the user's Downloads folder.
@@ -106,7 +104,7 @@ def fetch_recorded(
     no files are marked for fetching, the function will also abort.
     """
     if gopros is None or len(gopros) < 1:
-        logger.warning("No GoPro Connection found! Fetching data aboarded...")
+        logger.warning("No GoPro Connection found! Fetching data aborted...")
         return
     connected_cams = {connection._identifier: connection for connection in gopros}
 
@@ -134,11 +132,12 @@ def fetch_recorded(
         for idx, entry in enumerate(entry_list):
             for _ in range(allowed_retries):
                 response_info = make_gopro_request(
-                        connected_cams[cam_id],
-                        f"gopro/media/info?path={entry['folder']}/{entry['file']}"
-                    )
-                if response_info.status_code == 200: break
-                else: time.sleep(1)
+                    connected_cams[cam_id],
+                    f"gopro/media/info?path={entry['folder']}/{entry['file']}",
+                )
+                if response_info and response_info.status_code == 200:
+                    break
+                time.sleep(1)
             else:
                 logger.warning(
                     f"Timeout: Data of {cam_id} could not be fetched. Filename: "
@@ -185,15 +184,17 @@ def _fetch_recoding(
     save_path_cam: Path,
     filename: str,
     cam_id: str,
-    idx: int
+    idx: int,
 ) -> tuple[str, int, bool, tuple[Path, str]]:
     response = make_gopro_request(connection, request_path)
-    if response.status_code == 200:
+    status = False
+    if response and response.status_code == 200:
+        status = True
         Path(save_path_cam).mkdir(exist_ok=True, parents=True)
         with Path(save_path_cam / filename).open("wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-    return cam_id, idx, response.status_code == 200, (save_path_cam, filename)
+    return cam_id, idx, status, (save_path_cam, filename)
 
 
 def _get_saved_entries() -> dict:

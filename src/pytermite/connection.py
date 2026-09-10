@@ -18,10 +18,10 @@ import os
 import pathlib
 import re
 import sys
+import tempfile
 import traceback
 from collections.abc import AsyncGenerator
 from typing import Any
-import tempfile
 
 import click
 import requests
@@ -32,6 +32,7 @@ from bleak.backends.scanner import AdvertisementData
 from open_gopro import WiredGoPro, WirelessGoPro
 from open_gopro.domain.exceptions import ResponseTimeout
 from open_gopro.models.proto import EnumCOHNNetworkState, EnumCOHNStatus
+from requests import Response
 from zeroconf import ServiceListener, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo
 
@@ -46,7 +47,7 @@ logger = structlog.get_logger()
 
 GOPROS: set[str] = set()
 BLES: set[str] = set()
-INTERRUPT = asyncio.Event()
+INTERRUPT: asyncio.Event
 SERIALS_PATH = resolve_config_path(
     "PYTERMITE_SERIALS_PATH",
     default_filename="serials.json",
@@ -79,8 +80,11 @@ class WiredConnection(WiredGoPro):
         super().__init__(**kwargs)
         self._name: str | None = name
         self.serial = self._serial
-        self.ip_address = f"172.2{serial_nr[-3]}.1{serial_nr[-2:]}.51:8080"
-        self._identifier = self.serial[-4:]
+        self._identifier: str | None = None
+        if self.serial is not None:
+            self._identifier = self.serial[-4:]
+        else:
+            logger.warning("Serial number could not be determined for WiredConnection.")
 
     @property
     async def name(self) -> str:
@@ -120,13 +124,14 @@ class WirelessConnection(WirelessGoPro):
 
     #     return self.identifier
 
+
 def make_gopro_request(
     connection: WirelessConnection | WiredConnection,
     request_path: str,
     timeout: int = 10
     ) -> requests.Response | None:
     """
-    Make GET request to provided GoPro Connection
+    Make GET request to provided GoPro Connection.
 
     Parameters
     ----------
@@ -143,17 +148,15 @@ def make_gopro_request(
         Response created by made request,
         None if no valid connection is provided
     """
-    respose = None
+    response = None
     if isinstance(connection, WirelessConnection):
         if connection.cohn.credentials is None:
             logger.warning("Connection does not have Cohn credentials.")
-            return
+            return None
         url = f"https://{connection.ip_address}/{request_path}"
         cert_string = connection.cohn.credentials.certificate
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", delete=False, suffix=".pem"
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".pem") as f:
             f.write(cert_string)
             cert_path = f.name
 
@@ -165,14 +168,28 @@ def make_gopro_request(
             response = requests.request(
                 "GET", url, verify=cert_path, auth=auth, timeout=timeout
             )
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                f"Request failed for GoPro {connection.identifier} at {url}",
+                cam_serial=connection.identifier,
+                url=url,
+                error=str(e),
+            )
+            pass
         finally:
-            Path(cert_path).unlink()
+            pathlib.Path(cert_path).unlink()
 
     elif isinstance(connection, WiredConnection):
         try:
             url = f"http://{connection.ip_address}/{request_path}"
             response = requests.request("GET", url, timeout=timeout)
-        except:
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                f"Request failed for GoPro {connection.identifier} at {url}",
+                cam_serial=connection.identifier,
+                url=url,
+                error=str(e),
+            )
             pass
     return response
 
@@ -539,7 +556,7 @@ async def _wait_for_user_interrupt_windows() -> None:
     Polls ``msvcrt`` in short intervals so task cancellation is handled
     cooperatively by the event loop.
     """
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         while True:
@@ -598,12 +615,12 @@ async def wait_for_user_interrupt() -> None:
     except RuntimeError:
         print("Waiting for user input (press Enter)...")
 
-    if os.name == "nt":
+    if sys.platform == "win32":
         await _wait_for_user_interrupt_windows()
-    elif os.name == "posix":
+    elif sys.platform == "linux" or sys.platform == "darwin":
         await _wait_for_user_interrupt_unix()
     else:
-        logger.warning("Unsupported operating system: %s.", os.name)
+        logger.warning("Unsupported operating system: %s.", sys.platform)
 
     global INTERRUPT
     INTERRUPT.set()
@@ -638,6 +655,7 @@ async def scan_for_gopros(
         raise ValueError("At least one of usb or bluetooth must be True")
 
     global GOPROS, BLES, INTERRUPT
+    INTERRUPT = asyncio.Event()
     tasks: list[asyncio.Task[None]] = []
     # reset state for each invocation
     GOPROS = set()
@@ -667,7 +685,10 @@ async def scan_for_gopros(
                 result, asyncio.CancelledError
             ):
                 raise result
-        await logger.ainfo(f"Found {len(GOPROS)} devices")
+        if usb:
+            await logger.ainfo(f"Found {len(GOPROS)} devices")
+        if bluetooth:
+            await logger.ainfo(f"Found {len(BLES)} devices")
         INTERRUPT.clear()
     return GOPROS, BLES
 
