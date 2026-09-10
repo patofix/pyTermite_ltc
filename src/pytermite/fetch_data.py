@@ -19,7 +19,7 @@ from pathlib import Path
 import requests
 import structlog
 
-from pytermite.config import PYTERMITE_LOG_LEVEL
+from pytermite.config import PYTERMITE_LOG_LEVEL, resolve_config_path
 from pytermite.connection import WiredConnection, WirelessConnection, make_gopro_request
 
 structlog.configure(
@@ -148,7 +148,7 @@ def fetch_recorded(
 
             tasks.append(
                 (
-                    connected_cams[cam_id]
+                    connected_cams[cam_id],
                     f"videos/DCIM/{entry['folder']}/{entry['file']}",
                     save_path_cam,
                     entry["file"],
@@ -180,7 +180,7 @@ def fetch_recorded(
 
 
 def _fetch_recoding(
-    connection: Wireless | WiredConnection,
+    connection: WirelessConnection | WiredConnection,
     request_path: str,
     save_path_cam: Path,
     filename: str,
