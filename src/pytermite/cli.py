@@ -22,6 +22,7 @@ import time
 from multiprocessing import Event, Process
 from multiprocessing.synchronize import Event as SyncEvent
 from pathlib import Path
+from open_gopro.models.constants import SettingId
 
 import click
 import structlog
@@ -42,13 +43,14 @@ from pytermite.connection import (
     create_wireless_gopros,
     load_cohn_identifiers,
     scan_for_gopros,
+    make_gopro_request
 )
 from pytermite.fetch_data import fetch_filenames, fetch_recorded
 from pytermite.lineartimecode import (
     LTCGenerator,
     decode_timecode_batch,
 )
-from pytermite.utils import load_serial_numbers_from_json
+from pytermite.utils import load_serial_numbers_from_json, parse_setting
 
 os.environ["LANG"] = "en_US"
 
@@ -726,6 +728,30 @@ def decode_path(action: str, input_path: str | None, fps: int) -> None:
         elif action == "stop":
             for p in decode_processes:
                 p.terminate()
+    except RuntimeError as e:
+        log.error(str(e))
+    if KEEP_OPEN:
+        _run_repl(click.get_current_context())
+
+@cli.command()
+@click.argument("identifier", type=str)
+@click.argument("setting", type=str)
+@click.argument("option", type=str)
+def change_setting(identifier:str, setting:str, option:str):
+    global CONNECTED_GOPROS
+    log = logger.bind(command="change_setting")
+    try:
+        connection = next((con for con in CONNECTED_GOPROS if con._identifier == identifier or con._name == identifier), None)
+        if connection is None:
+            log.warning(f"{identifier} is not connected")
+        else:
+            sid, oid = parse_setting(setting, option)
+            request_path = f"gopro/camera/setting?option={oid}&setting={sid}"
+            response = make_gopro_request(connection, request_path)
+            if response is not None and response.status_code == 200:
+                log.info(f"Changed {setting} for {identifier} to {option}")
+            else:
+                log.warning(f"{setting} for {identifier} could not be changed")
     except RuntimeError as e:
         log.error(str(e))
     if KEEP_OPEN:
