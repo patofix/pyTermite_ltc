@@ -22,6 +22,7 @@ import time
 from multiprocessing import Event, Process
 from multiprocessing.synchronize import Event as SyncEvent
 from pathlib import Path
+from tabulate import tabulate
 from open_gopro.models.constants import SettingId
 
 import click
@@ -50,7 +51,11 @@ from pytermite.lineartimecode import (
     LTCGenerator,
     decode_timecode_batch,
 )
-from pytermite.utils import load_serial_numbers_from_json, parse_setting
+from pytermite.utils import (
+    load_serial_numbers_from_json,
+    parse_setting,
+    parse_status
+)
 
 os.environ["LANG"] = "en_US"
 
@@ -752,6 +757,66 @@ def change_setting(identifier:str, setting:str, option:str):
                 log.info(f"Changed {setting} for {identifier} to {option}")
             else:
                 log.warning(f"{setting} for {identifier} could not be changed")
+    except RuntimeError as e:
+        log.error(str(e))
+    if KEEP_OPEN:
+        _run_repl(click.get_current_context())
+
+
+@cli.command()
+@click.option("--settings", is_flag=True, show_default=False)
+@click.option("--status", is_flag=True, show_default=False)
+@click.argument("identifiers", default = None, type=str)
+def get_camera_state(identifiers:str, settings:bool, status:bool):
+    global CONNECTED_GOPROS
+    log = logger.bind(command="get_camera_state")
+    if identifiers is None:
+        identifiers = [con._identifier for con in CONNECTED_GOPROS]
+    else:
+        identifiers = [arg.strip() for arg in identifiers.split(",") if arg.strip()]
+    table_settings = {}
+    table_statuses = {}
+    identifiers_type = []
+    try:
+        for identifier in identifiers:
+            connection = next((con for con in CONNECTED_GOPROS if con._identifier == identifier or con._name == identifier), None)
+            if connection is None:
+                log.warning(f"{identifier} is not connected")
+            else:
+                con_type = "Wireless" if isinstance(connection, WirelessConnection) else "USB" if isinstance(connection, WiredConnection) else "Undefined"
+                identifiers_type.append(f"{identifier} ({con_type})")
+                request_path = f"gopro/camera/state"
+                response = make_gopro_request(connection, request_path)
+                if response is not None and response.status_code == 200:
+                    response_data = response.json()
+                    for key, value in response_data["settings"].items():
+                        name, option = parse_setting(key, str(value), mode="name")
+                        if name is None: continue
+                        if name in table_settings:
+                            table_settings[name].append(option)
+                        else:
+                            table_settings[name] = [name, option]
+                    for key, value in response_data["status"].items():
+                        name = parse_status(key)
+                        if name in table_statuses:
+                            table_statuses[name].append(value)
+                        else:
+                            table_statuses[name] = [name, value]
+                else:
+                    log.warning(f"State request for {identifier} failed")
+        
+        if not(status and not settings):
+            log.info(f"\n####\nCamera settings:\n####")
+            headers = ["Settings"]
+            headers.extend(identifiers_type)
+            table_data = [table_settings[key] for key in table_settings]
+            print(tabulate(table_data, headers=headers, tablefmt="fancy_grid"))
+        if not(settings and not status):
+            log.info(f"\n####\nCamera statuses:\n####")
+            headers = ["Status"]
+            headers.extend(identifiers_type)
+            table_data = [table_statuses[key] for key in table_statuses]
+            print(tabulate(table_data, headers=headers, tablefmt="fancy_grid"))
     except RuntimeError as e:
         log.error(str(e))
     if KEEP_OPEN:
