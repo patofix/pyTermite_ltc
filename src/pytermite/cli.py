@@ -19,6 +19,7 @@ import logging
 import os
 import shlex
 import time
+from tabulate import tabulate
 from multiprocessing import Event, Process
 from multiprocessing.synchronize import Event as SyncEvent
 from pathlib import Path
@@ -42,6 +43,7 @@ from pytermite.connection import (
     create_wired_gopros,
     create_wireless_gopros,
     load_cohn_identifiers,
+    make_gopro_request,
     scan_for_gopros,
     make_gopro_request
 )
@@ -569,6 +571,47 @@ async def _connect_to_gopros() -> None:
             "variables are not set: PYTERMITE_COHN_SSID and "
             "PYTERMITE_COHN_PASSWORD."
         )
+
+
+@cli.command()
+def list_settings() -> None:
+    """List current settings and environment variables."""
+    log = logger.bind(command="list_settings")
+    log.debug("Listing current settings and environment variables")
+
+    async def fetch_all_settings():
+        tasks = [make_gopro_request(gp, "gopro/camera/state") for gp in CONNECTED_GOPROS]
+        friendly_name = [camera.identifier for camera in CONNECTED_GOPROS]
+        try:
+            result = await asyncio.gather(*tasks)
+        except TypeError as e:
+            log.warning("No responses received from GoPro cameras.")
+            result = []
+
+        return result, friendly_name
+
+    responses, friendly_name = asyncio.run(fetch_all_settings())
+
+    for friendly_name, resp in zip(friendly_name, responses):
+        print(f"GoPro: {friendly_name}")
+
+        # convert GoProResp data into a list of [Setting, Value] pairs
+        if resp.data:
+            # only settings are shown (otherwise: show all or StatusId.)
+            state_data = {
+                k: v for k, v in resp.data.items() 
+                if str(k).startswith("SettingId.")
+            }
+        else:
+            state_data = {}
+
+        table_data = [
+            [str(key).split(".")[-1], str(val)] 
+            for key, val in state_data.items()
+        ]
+
+        # Formats cleanly in terminal grid layout
+        print(tabulate(table_data, headers=["Setting", "Value"], tablefmt="fancy_grid"))
 
 
 @cli.command()
