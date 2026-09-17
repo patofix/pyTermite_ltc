@@ -24,6 +24,7 @@ from multiprocessing import Event, Process
 from multiprocessing.synchronize import Event as SyncEvent
 from pathlib import Path
 from open_gopro.models.constants import SettingId
+from pytermite.preview_stream import PreviewStream
 
 import click
 import structlog
@@ -815,6 +816,42 @@ def change_setting(identifier:str, setting:str, option:str):
     if KEEP_OPEN:
         _run_repl(click.get_current_context())
 
+preview_processes = []
+@cli.command()
+@click.argument("action", type=click.Choice(["start", "stop"]), default=None)
+def preview_stream(action: str) -> None:
+    log = logger.bind(command="preview-stream")
+    global CONNECTED_SERIALS
+    global preview_processes
+    try:
+        #cams_available = CONNECTED_SERIALS is not None and len(CONNECTED_SERIALS) > 0
+        cams_available = True
+        if action == "start" and cams_available:
+            stop_event = asyncio.Event()
+            preview_process = Process(
+                target=_run_preview,
+                 args=(CONNECTED_GOPROS, stop_event, log)
+            )
+            preview_process.start()
+            preview_processes.append((preview_process, stop_event))
+        elif action == "stop":
+            delete_list = []
+            for idx, p in enumerate(preview_processes):
+                p[1].set()
+                if not p[0].is_alive():
+                    delete_list.append(idx)
+            for i in sorted(delete_list, reverse=True):
+                del preview_processes[i]
+                log.info(f"Stopped preview process {i}")
+        else:
+            log.warning("Preview could not be started: Invalid parameters/No GoPros available")
+    except RuntimeError as e:
+        log.error(str(e))
+    if KEEP_OPEN:
+        _run_repl(click.get_current_context())
+
+def _run_preview(serials, stop_event, logger):
+    stream = PreviewStream(serials, stop_event, logger)
 
 def _run_generator(config: dict, stop_event: SyncEvent) -> None:
     generator = LTCGenerator(config, stop_event)

@@ -137,7 +137,7 @@ class WirelessConnection(WirelessGoPro):
 
 
 def make_gopro_request(
-    connection: WirelessConnection | WiredConnection,
+    connection: WirelessConnection | WiredConnection | str,
     request_path: str,
     timeout: int = 10
     ) -> requests.Response | None:
@@ -203,6 +203,31 @@ def make_gopro_request(
             pass
         finally:
             pathlib.Path(cert_path).unlink()
+
+    if isinstance(connection, WiredConnection):
+        url = f"http://{connection.ip_address}:8080/{request_path}"
+        try:
+            response = requests.get(url, timeout=timeout)
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                f"Request failed for GoPro {connection.identifier} at {url}",
+                cam_serial=connection.identifier,
+                url=url,
+                error=str(e),
+            )
+            pass
+
+    if isinstance(connection, str):
+        url = f"http://{connection}/{request_path}"
+        try:
+            response = requests.get(url, timeout=timeout)
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                f"Request failed for GoPro at {url}",
+                url=url,
+                error=str(e),
+            )
+            pass
 
     return response
 
