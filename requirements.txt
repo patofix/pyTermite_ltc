@@ -13,3 +13,5 @@ soundfile
 pylsl
 tabulate
 pandas
+pillow
+tk
