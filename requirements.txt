@@ -12,3 +12,4 @@ sounddevice
 soundfile
 pylsl
 tabulate
+pandas

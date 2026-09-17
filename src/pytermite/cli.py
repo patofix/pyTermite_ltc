@@ -19,6 +19,7 @@ import logging
 import os
 import shlex
 import time
+from tabulate import tabulate
 from multiprocessing import Event, Process
 from multiprocessing.synchronize import Event as SyncEvent
 from pathlib import Path
@@ -43,6 +44,7 @@ from pytermite.connection import (
     create_wired_gopros,
     create_wireless_gopros,
     load_cohn_identifiers,
+    make_gopro_request,
     scan_for_gopros,
     make_gopro_request
 )
@@ -56,6 +58,8 @@ from pytermite.utils import (
     parse_setting,
     parse_status
 )
+
+from open_gopro.models.constants import StatusId
 
 os.environ["LANG"] = "en_US"
 
@@ -577,13 +581,66 @@ async def _connect_to_gopros() -> None:
 
 
 @cli.command()
+def list_settings() -> None:
+    """List current settings and environment variables."""
+    log = logger.bind(command="list_settings")
+    log.debug("Listing current settings and environment variables")
+
+    async def fetch_all_settings():
+        tasks = [gp.http_command.get_camera_state() for gp in CONNECTED_GOPROS]
+        friendly_name = [camera.identifier for camera in CONNECTED_GOPROS]
+        try:
+            result = await asyncio.gather(*tasks)
+        except TypeError as e:
+            log.warning("No responses received from GoPro cameras.")
+            result = []
+
+        return result, friendly_name
+
+    responses, friendly_name = asyncio.run(fetch_all_settings())
+
+    for friendly_name, resp in zip(friendly_name, responses):
+        print(f"GoPro: {friendly_name}")
+
+        # convert GoProResp data into a list of [Setting, Value] pairs
+        if resp.data:
+            # only settings are shown (otherwise: show all or StatusId.)
+            state_data = {
+                k: v for k, v in resp.data.items() 
+                if str(k).startswith("SettingId.")
+            }
+        else:
+            state_data = {}
+
+        table_data = [
+            [str(key).split(".")[-1], str(val)] 
+            for key, val in state_data.items()
+        ]
+
+        # Formats cleanly in terminal grid layout
+        print(tabulate(table_data, headers=["Setting", "Value"], tablefmt="fancy_grid"))
+
+
+@cli.command()
 def list_connected() -> None:
     """List connected GoPros."""
     log = logger.bind(command="list_connected")
     log.debug("Listing connected GoPro cameras")
     global CONNECTED_GOPROS
     for gopro in CONNECTED_GOPROS:
-        print("GoPro: ", gopro.identifier)
+
+        # check connection and retrieve information
+        try:
+            state = asyncio.run(gopro.http_command.get_camera_state())
+            battery = state.data.get(StatusId.INTERNAL_BATTERY_PERCENTAGE, "Unknown")
+
+            print("GoPro: ", gopro.identifier, "\tBattery: ", battery)
+
+        except Exception as e:
+            continue
+
+
+        # print("GoPro: ", gopro.identifier)
 
 
 @cli.command()
@@ -743,6 +800,7 @@ def decode_path(action: str, input_path: str | None, fps: int) -> None:
 @click.argument("setting", type=str)
 @click.argument("option", type=str)
 def change_setting(identifier:str, setting:str, option:str):
+    return
     global CONNECTED_GOPROS
     log = logger.bind(command="change_setting")
     try:
