@@ -582,7 +582,7 @@ def list_settings() -> None:
     log.debug("Listing current settings and environment variables")
 
     async def fetch_all_settings():
-        tasks = [make_gopro_request(gp, "gopro/camera/state") for gp in CONNECTED_GOPROS]
+        tasks = [gp.http_command.get_camera_state() for gp in CONNECTED_GOPROS]
         friendly_name = [camera.identifier for camera in CONNECTED_GOPROS]
         try:
             result = await asyncio.gather(*tasks)
