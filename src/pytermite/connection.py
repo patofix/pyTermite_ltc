@@ -13,6 +13,8 @@ USB/mdns, and manage open/close life-cycle of WiredConnection objects.
 #  SPDX-License-Identifier: BSD-3-Clause
 
 import asyncio
+import contextlib
+from io import StringIO
 import json
 import os
 import pathlib
@@ -25,6 +27,7 @@ import tempfile
 import logging
 
 import click
+from pandas import io
 import requests
 import structlog
 from bleak import BleakScanner
@@ -395,7 +398,8 @@ async def connect_gopros_wireless(
     """
     for cam_name, gopro in list(gopros.items()):
         try:
-            await gopro.open(retries=5, timeout=10)
+            with contextlib.redirect_stderr(StringIO()):
+                await gopro.open(retries=5, timeout=10)
             await logger.ainfo(f"Connected to {gopro.identifier}", cam_name=cam_name)
 
             status = (await gopro.ble_command.cohn_get_status(register=True)).data
