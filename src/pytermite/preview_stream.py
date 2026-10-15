@@ -70,6 +70,11 @@ class PreviewStream():
             response = make_gopro_request(
                 connection, f"gopro/camera/stream/start?port={self.ips[connection.ip_address]}"
             )
+            if response.status_code == 409:
+                _ = make_gopro_request(connection, "gopro/camera/stream/stop")
+                response = make_gopro_request(
+                    connection, f"gopro/camera/stream/start?port={self.ips[connection.ip_address]}"
+                )
             if response is None or not response.ok:
                 self.logger.warning(
                     f"Failed to start stream for {connection.ip_address}: {response}"
@@ -81,6 +86,7 @@ class PreviewStream():
         for index, (ip, port) in enumerate(self.ips.items()):
             row, col = divmod(index, self.canvas_size)
 
+            self.logger.debug(f"Starting new Receiver for port {port}")
             receiver = UDPReceiver(self.canvas, row, col, ip, port, self.canvas_size, total_canvas_width)
             stream = threading.Thread(target=receiver.start, daemon=True)
             stream.start()
@@ -120,8 +126,8 @@ class UDPReceiver():
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         while raw_bytes := self.process.stdout.read(frame_size):
-            if len(raw_bytes) != frame_size:
-                continue
+            # if len(raw_bytes) != frame_size:
+            #     continue
             image = PIL.Image.frombytes("RGB", (width, height), raw_bytes)
 
             self.canvas.after(0, self._draw_frame, image, width, height)
