@@ -8,7 +8,10 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from pytermite.connection import WirelessConnection, WiredConnection
+
 from pytermite import utils
+
 
 
 class Color(Enum):
@@ -62,3 +65,56 @@ def test_serialize_fallback_object():
     x = X()
     out = utils.serialize_dict({"x": x})
     assert out["x"]["foo"] == "bar"
+
+def test_serializable_connections():
+    for connection_type in [WirelessConnection, WiredConnection]:
+        connection = object.__new__(connection_type)
+
+        connection._wired_api = object()
+        connection.streaming = object()
+        connection._loop = object()
+        connection.target = "Test1"
+
+        connections = {connection}
+
+        connections_serializable = utils.serializable_connections(connections)
+
+        original = next(iter(connections))
+        serializable = next(iter(connections_serializable))
+
+        assert serializable is not original
+
+        for name, value in vars(original).items():
+            value_serializable = getattr(serializable, name)
+
+            if name in {"_wired_api", "streaming", "_loop"}:
+                assert value_serializable is None
+            else:
+                assert value_serializable == value
+
+def test_parse_settings_and_status():
+    v1, v2 = utils.parse_setting("test", "test", mode="test")
+    assert v1 is None and v2 is None
+
+    v1, v2 = utils.parse_setting("test", "test")
+    assert v1 is None and v2 is None
+
+    settings = utils._load_bundled_json("OpenGoPro_Settings.json")
+
+    v1, v2 = utils.parse_setting("2", "test")
+    assert v1 is None and v2 is None
+
+    for setting in settings:
+        for option, value in settings[setting]["options"].items():
+            sname, oname = utils.parse_setting(setting, option, mode="name")
+            assert sname == settings[setting]["name"] and\
+                oname == settings[setting]["options"][option]
+
+            sid, oid = utils.parse_setting(sname, oname)
+            assert sname == settings[sid]["name"] and\
+                oname == settings[sid]["options"][oid]
+
+    statuses = utils._load_bundled_json("OpenGoPro_Statuses.json")
+    for status in statuses:
+        status_name = utils.parse_status(status)
+        assert status_name == statuses[status]
