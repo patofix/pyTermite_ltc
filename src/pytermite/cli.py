@@ -887,9 +887,10 @@ def record(action: str) -> None:  # numpydoc ignore=GL03
 @click.option("--device", default=None, type=int)
 @click.option("--fps", default=50, type=int)
 @click.option("--sample_rate", default=48000, type=int)
+@click.option("--no_system_time", is_flag=True, show_default=False)
 @click.argument("action", type=click.Choice(["start", "stop"]))
 def generate_timecode(  # numpydoc ignore=GL03
-    action: str, device: int | None, fps: int, sample_rate: int
+    action: str, device: int | None, fps: int, sample_rate: int, no_system_time: bool
 ) -> None:
     """
     Start or stop timecode generation.
@@ -914,7 +915,7 @@ def generate_timecode(  # numpydoc ignore=GL03
         if device is None:
             device = sd.query_devices(kind="output")["index"]
         if action == "start" and device is not None:
-            ltc_config = {"sample_rate": sample_rate, "fps": fps, "device": device}
+            ltc_config = {"sample_rate": sample_rate, "fps": fps, "device": device, "use_system_time": not no_system_time}
             stop_event = Event()
             ltc_process = Process(target=_run_generator, args=(ltc_config, stop_event))
             ltc_process.start()
